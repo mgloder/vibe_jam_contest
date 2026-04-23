@@ -4,16 +4,16 @@ using System.Collections.Generic;
 public partial class SnakeGame : Node2D
 {
 	[Export]
-	public int CellSize { get; set; } = 32;
+	public int CellSize { get; set; } = 28;
 
 	[Export]
-	public int GridWidth { get; set; } = 40;
+	public int GridWidth { get; set; } = 30;
 
 	[Export]
-	public int GridHeight { get; set; } = 22;
+	public int GridHeight { get; set; } = 18;
 
 	[Export]
-	public double MoveIntervalSec { get; set; } = 0.125;
+	public double MoveIntervalSec { get; set; } = 0.14;
 
 	private readonly List<Vector2I> _snake = new();
 	private Vector2I _direction = new(1, 0);
@@ -21,10 +21,15 @@ public partial class SnakeGame : Node2D
 	private Vector2I _apple;
 	private bool _gameOver;
 	private int _score;
+	private int _bestScore;
 
 	private Timer _timer = null!;
 	private Label _scoreLabel = null!;
+	private Label _lengthLabel = null!;
+	private Label _bestLabel = null!;
+	private Label _statusLabel = null!;
 	private Label _gameOverLabel = null!;
+	private Control _gameOverPanel = null!;
 	private readonly RandomNumberGenerator _rng = new();
 
 	public override void _Ready()
@@ -32,7 +37,11 @@ public partial class SnakeGame : Node2D
 		_rng.Randomize();
 		_timer = GetNode<Timer>("%MoveTimer");
 		_scoreLabel = GetNode<Label>("%ScoreLabel");
+		_lengthLabel = GetNode<Label>("%LengthLabel");
+		_bestLabel = GetNode<Label>("%BestLabel");
+		_statusLabel = GetNode<Label>("%StatusLabel");
 		_gameOverLabel = GetNode<Label>("%GameOverLabel");
+		_gameOverPanel = GetNode<Control>("%GameOverPanel");
 		_timer.WaitTime = MoveIntervalSec;
 		_timer.Timeout += OnMoveTick;
 		ResetGame();
@@ -42,22 +51,53 @@ public partial class SnakeGame : Node2D
 	{
 		var origin = GetGridPixelOrigin();
 		var gridPx = new Vector2(GridWidth * CellSize, GridHeight * CellSize);
-		DrawRect(new Rect2(origin, gridPx), new Color(0.06f, 0.09f, 0.07f));
-		DrawRect(new Rect2(origin, gridPx), new Color(0.15f, 0.2f, 0.14f), false, 2f);
+		var shadowOffset = new Vector2(0f, 10f);
+		DrawRect(new Rect2(origin + shadowOffset, gridPx), new Color(0f, 0f, 0f, 0.18f));
+		DrawRect(new Rect2(origin, gridPx), new Color(0.05f, 0.08f, 0.06f));
 
-		var inset = new Vector2(1.5f, 1.5f);
-		var cellInner = new Vector2(CellSize - 3f, CellSize - 3f);
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				var tilePos = origin + new Vector2(x * CellSize, y * CellSize);
+				var tileColor = (x + y) % 2 == 0
+					? new Color(0.10f, 0.16f, 0.11f)
+					: new Color(0.12f, 0.19f, 0.13f);
+				DrawRect(new Rect2(tilePos, new Vector2(CellSize, CellSize)), tileColor);
+			}
+		}
+
+		DrawRect(new Rect2(origin, gridPx), new Color(0.32f, 0.48f, 0.34f), false, 3f);
+
+		var inset = new Vector2(3f, 3f);
+		var cellInner = new Vector2(CellSize - 6f, CellSize - 6f);
 
 		for (var i = 0; i < _snake.Count; i++)
 		{
 			var cell = _snake[i];
 			var pos = origin + new Vector2(cell.X * CellSize, cell.Y * CellSize) + inset;
-			var color = i == 0 ? new Color(0.45f, 0.95f, 0.45f) : new Color(0.25f, 0.75f, 0.35f);
-			DrawRect(new Rect2(pos, cellInner), color);
+			var shadowRect = new Rect2(pos + new Vector2(1f, 2f), cellInner);
+			var bodyRect = new Rect2(pos, cellInner);
+			var color = i == 0 ? new Color(0.53f, 0.95f, 0.54f) : new Color(0.28f, 0.78f, 0.35f);
+			var highlight = i == 0 ? new Color(0.79f, 1f, 0.82f) : new Color(0.54f, 0.92f, 0.59f);
+
+			DrawRect(shadowRect, new Color(0f, 0f, 0f, 0.18f));
+			DrawRect(bodyRect, color);
+			DrawRect(new Rect2(pos + new Vector2(2f, 2f), cellInner - new Vector2(6f, 10f)), highlight);
+		}
+
+		if (_snake.Count > 0)
+		{
+			var headPos = origin + new Vector2(_snake[0].X * CellSize, _snake[0].Y * CellSize) + inset;
+			DrawHeadEyes(headPos, cellInner);
 		}
 
 		var applePos = origin + new Vector2(_apple.X * CellSize, _apple.Y * CellSize) + inset;
-		DrawRect(new Rect2(applePos, cellInner), new Color(0.95f, 0.2f, 0.2f));
+		DrawRect(new Rect2(applePos + new Vector2(1f, 2f), cellInner), new Color(0f, 0f, 0f, 0.18f));
+		DrawRect(new Rect2(applePos, cellInner), new Color(0.91f, 0.18f, 0.25f));
+		DrawRect(new Rect2(applePos + new Vector2(3f, 3f), cellInner - new Vector2(10f, 12f)), new Color(1f, 0.43f, 0.48f));
+		DrawRect(new Rect2(applePos + new Vector2(cellInner.X * 0.42f, -2f), new Vector2(3f, 8f)), new Color(0.39f, 0.25f, 0.16f));
+		DrawRect(new Rect2(applePos + new Vector2(cellInner.X * 0.52f, 1f), new Vector2(8f, 4f)), new Color(0.33f, 0.72f, 0.36f));
 	}
 
 	public override void _UnhandledInput(InputEvent @event)
@@ -157,8 +197,10 @@ public partial class SnakeGame : Node2D
 	{
 		_gameOver = true;
 		_timer.Stop();
-		_gameOverLabel.Text = $"Game over — Score {_score}. Press R to restart.";
-		_gameOverLabel.Visible = true;
+		_bestScore = Mathf.Max(_bestScore, _score);
+		_gameOverLabel.Text = $"Score {_score}  |  Length {_snake.Count}\nPress R to restart and chase a better run.";
+		_gameOverPanel.Visible = true;
+		UpdateHud();
 	}
 
 	private void ResetGame()
@@ -175,7 +217,7 @@ public partial class SnakeGame : Node2D
 		_queuedDirection = _direction;
 
 		SpawnApple();
-		_gameOverLabel.Visible = false;
+		_gameOverPanel.Visible = false;
 		UpdateHud();
 		QueueRedraw();
 
@@ -201,7 +243,12 @@ public partial class SnakeGame : Node2D
 
 	private void UpdateHud()
 	{
-		_scoreLabel.Text = $"Score: {_score}";
+		_scoreLabel.Text = _score.ToString();
+		_lengthLabel.Text = _snake.Count.ToString();
+		_bestLabel.Text = _bestScore.ToString();
+		_statusLabel.Text = _gameOver
+			? "Crash detected. Reset with R and try a cleaner route."
+			: $"Heading {DirectionName(_direction)}. Apples eaten: {_score}.";
 	}
 
 	private Vector2 GetGridPixelOrigin()
@@ -209,6 +256,46 @@ public partial class SnakeGame : Node2D
 		var vs = GetViewportRect().Size;
 		var gw = GridWidth * CellSize;
 		var gh = GridHeight * CellSize;
-		return new Vector2((vs.X - gw) * 0.5f, (vs.Y - gh) * 0.5f);
+		var topSafeArea = 120f;
+		var bottomSafeArea = 72f;
+		var availableHeight = vs.Y - topSafeArea - bottomSafeArea;
+		return new Vector2((vs.X - gw) * 0.5f, topSafeArea + (availableHeight - gh) * 0.5f);
+	}
+
+	private void DrawHeadEyes(Vector2 headPos, Vector2 cellInner)
+	{
+		var eyeSize = new Vector2(4f, 4f);
+		var leftEye = headPos + new Vector2(5f, 5f);
+		var rightEye = headPos + new Vector2(cellInner.X - 9f, 5f);
+
+		if (_direction == Vector2I.Left)
+		{
+			leftEye = headPos + new Vector2(4f, 5f);
+			rightEye = headPos + new Vector2(4f, cellInner.Y - 9f);
+		}
+		else if (_direction == Vector2I.Right)
+		{
+			leftEye = headPos + new Vector2(cellInner.X - 8f, 5f);
+			rightEye = headPos + new Vector2(cellInner.X - 8f, cellInner.Y - 9f);
+		}
+		else if (_direction == Vector2I.Down)
+		{
+			leftEye = headPos + new Vector2(5f, cellInner.Y - 8f);
+			rightEye = headPos + new Vector2(cellInner.X - 9f, cellInner.Y - 8f);
+		}
+
+		DrawRect(new Rect2(leftEye, eyeSize), Colors.Black);
+		DrawRect(new Rect2(rightEye, eyeSize), Colors.Black);
+	}
+
+	private static string DirectionName(Vector2I direction)
+	{
+		if (direction == Vector2I.Up)
+			return "up";
+		if (direction == Vector2I.Down)
+			return "down";
+		if (direction == Vector2I.Left)
+			return "left";
+		return "right";
 	}
 }

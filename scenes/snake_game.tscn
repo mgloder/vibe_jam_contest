@@ -1,15 +1,72 @@
-[gd_scene format=3 uid="uid://bf2oho80darce"]
+[gd_scene load_steps=4 format=3 uid="uid://bf2oho80darce"]
 
 [ext_resource type="Script" path="res://scripts/SnakeGame.cs" id="1_snake"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+bg_color = Color(0.0823529, 0.105882, 0.145098, 0.921569)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.243137, 0.341176, 0.486275, 0.941176)
+corner_radius_top_left = 22
+corner_radius_top_right = 22
+corner_radius_bottom_right = 22
+corner_radius_bottom_left = 22
+shadow_color = Color(0, 0, 0, 0.28)
+shadow_size = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_overlay"]
+bg_color = Color(0.0705882, 0.0901961, 0.129412, 0.960784)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.360784, 0.447059, 0.584314, 0.901961)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
 
 [node name="SnakeGame" type="Node2D"]
 script = ExtResource("1_snake")
 
 [node name="MoveTimer" type="Timer" parent="."]
 unique_name_in_owner = true
-wait_time = 0.125
+wait_time = 0.14
 one_shot = false
 autostart = false
+
+[node name="BackgroundLayer" type="CanvasLayer" parent="."]
+layer = -1
+
+[node name="Background" type="ColorRect" parent="BackgroundLayer"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.0392157, 0.054902, 0.0784314, 1)
+
+[node name="TopGlow" type="ColorRect" parent="BackgroundLayer"]
+layout_mode = 0
+offset_left = -54.0
+offset_top = -36.0
+offset_right = 720.0
+offset_bottom = 200.0
+mouse_filter = 2
+color = Color(0.184314, 0.317647, 0.509804, 0.22)
+
+[node name="BottomGlow" type="ColorRect" parent="BackgroundLayer"]
+layout_mode = 0
+offset_left = 820.0
+offset_top = 452.0
+offset_right = 1436.0
+offset_bottom = 876.0
+mouse_filter = 2
+color = Color(0.188235, 0.454902, 0.25098, 0.2)
 
 [node name="UI" type="CanvasLayer" parent="."]
 
@@ -22,13 +79,172 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="ScoreLabel" type="Label" parent="UI/Overlay"]
-unique_name_in_owner = true
+[node name="TopLeftCard" type="PanelContainer" parent="UI/Overlay"]
 layout_mode = 0
-offset_left = 20.0
-offset_top = 16.0
-theme_override_font_sizes/font_size = 22
+offset_left = 24.0
+offset_top = 22.0
+offset_right = 360.0
+offset_bottom = 176.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="TopLeftMargin" type="MarginContainer" parent="UI/Overlay/TopLeftCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="TopLeftVBox" type="VBoxContainer" parent="UI/Overlay/TopLeftCard/TopLeftMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="GameTitle" type="Label" parent="UI/Overlay/TopLeftCard/TopLeftMargin/TopLeftVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+theme_override_colors/font_color = Color(0.921569, 0.956863, 0.992157, 1)
+text = "Snake Garden"
+
+[node name="StatusLabel" type="Label" parent="UI/Overlay/TopLeftCard/TopLeftMargin/TopLeftVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+theme_override_colors/font_color = Color(0.654902, 0.72549, 0.831373, 1)
+text = "Collect apples and avoid your own body."
+autowrap_mode = 3
+
+[node name="StatsRow" type="HBoxContainer" parent="UI/Overlay"]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 188.0
+offset_right = 482.0
+offset_bottom = 266.0
+theme_override_constants/separation = 14
+
+[node name="ScoreCard" type="PanelContainer" parent="UI/Overlay/StatsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="ScoreMargin" type="MarginContainer" parent="UI/Overlay/StatsRow/ScoreCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="ScoreVBox" type="VBoxContainer" parent="UI/Overlay/StatsRow/ScoreCard/ScoreMargin"]
+layout_mode = 2
+
+[node name="ScoreCaption" type="Label" parent="UI/Overlay/StatsRow/ScoreCard/ScoreMargin/ScoreVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.596078, 0.670588, 0.776471, 1)
+text = "SCORE"
+
+[node name="ScoreLabel" type="Label" parent="UI/Overlay/StatsRow/ScoreCard/ScoreMargin/ScoreVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.968627, 0.980392, 0.992157, 1)
 text = "Score: 0"
+
+[node name="LengthCard" type="PanelContainer" parent="UI/Overlay/StatsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="LengthMargin" type="MarginContainer" parent="UI/Overlay/StatsRow/LengthCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="LengthVBox" type="VBoxContainer" parent="UI/Overlay/StatsRow/LengthCard/LengthMargin"]
+layout_mode = 2
+
+[node name="LengthCaption" type="Label" parent="UI/Overlay/StatsRow/LengthCard/LengthMargin/LengthVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.596078, 0.670588, 0.776471, 1)
+text = "LENGTH"
+
+[node name="LengthLabel" type="Label" parent="UI/Overlay/StatsRow/LengthCard/LengthMargin/LengthVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.968627, 0.980392, 0.992157, 1)
+text = "3"
+
+[node name="BestCard" type="PanelContainer" parent="UI/Overlay/StatsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="BestMargin" type="MarginContainer" parent="UI/Overlay/StatsRow/BestCard"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="BestVBox" type="VBoxContainer" parent="UI/Overlay/StatsRow/BestCard/BestMargin"]
+layout_mode = 2
+
+[node name="BestCaption" type="Label" parent="UI/Overlay/StatsRow/BestCard/BestMargin/BestVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.596078, 0.670588, 0.776471, 1)
+text = "BEST"
+
+[node name="BestLabel" type="Label" parent="UI/Overlay/StatsRow/BestCard/BestMargin/BestVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+theme_override_colors/font_color = Color(0.968627, 0.980392, 0.992157, 1)
+text = "0"
+
+[node name="ControlCard" type="PanelContainer" parent="UI/Overlay"]
+layout_mode = 0
+offset_left = 962.0
+offset_top = 22.0
+offset_right = 1254.0
+offset_bottom = 238.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="ControlMargin" type="MarginContainer" parent="UI/Overlay/ControlCard"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="ControlVBox" type="VBoxContainer" parent="UI/Overlay/ControlCard/ControlMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ControlTitle" type="Label" parent="UI/Overlay/ControlCard/ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 22
+theme_override_colors/font_color = Color(0.921569, 0.956863, 0.992157, 1)
+text = "Controls"
+
+[node name="ControlText" type="Label" parent="UI/Overlay/ControlCard/ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.654902, 0.72549, 0.831373, 1)
+text = "Arrow keys: move\nNo direct opposite turns\nR: restart after crash"
+autowrap_mode = 3
 
 [node name="HintLabel" type="Label" parent="UI/Overlay"]
 layout_mode = 1
@@ -37,18 +253,18 @@ anchor_left = 0.5
 anchor_top = 1.0
 anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = -200.0
-offset_top = -40.0
-offset_right = 200.0
-offset_bottom = -12.0
+offset_left = -260.0
+offset_top = -44.0
+offset_right = 260.0
+offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 0
-theme_override_font_sizes/font_size = 16
-theme_override_colors/font_color = Color(0.65, 0.7, 0.75, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.576471, 0.647059, 0.745098, 1)
 horizontal_alignment = 1
-text = "Arrow keys: move · R: restart after game over"
+text = "Eat apples to grow. Hitting walls or your body ends the round."
 
-[node name="GameOverLabel" type="Label" parent="UI/Overlay"]
+[node name="GameOverPanel" type="PanelContainer" parent="UI/Overlay"]
 unique_name_in_owner = true
 visible = false
 layout_mode = 1
@@ -57,12 +273,43 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -320.0
-offset_top = -28.0
-offset_right = 320.0
-offset_bottom = 28.0
+offset_left = -250.0
+offset_top = -98.0
+offset_right = 250.0
+offset_bottom = 98.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_font_sizes/font_size = 20
+theme_override_styles/panel = SubResource("StyleBoxFlat_overlay")
+
+[node name="GameOverMargin" type="MarginContainer" parent="UI/Overlay/GameOverPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 22
+
+[node name="GameOverVBox" type="VBoxContainer" parent="UI/Overlay/GameOverPanel/GameOverMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="GameOverTitle" type="Label" parent="UI/Overlay/GameOverPanel/GameOverMargin/GameOverVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 34
+theme_override_colors/font_color = Color(0.980392, 0.913725, 0.913725, 1)
 horizontal_alignment = 1
+text = "Run Over"
+
+[node name="GameOverLabel" type="Label" parent="UI/Overlay/GameOverPanel/GameOverMargin/GameOverVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.815686, 0.85098, 0.913725, 1)
+horizontal_alignment = 1
+autowrap_mode = 3
 text = "Game over"

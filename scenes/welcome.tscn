@@ -1,6 +1,44 @@
-[gd_scene load_steps=2 format=3 uid="uid://bj4qm8w3kx7np"]
+[gd_scene load_steps=5 format=3 uid="uid://bj4qm8w3kx7np"]
 
 [ext_resource type="Script" path="res://scripts/WelcomeScreen.cs" id="1_welcome"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+bg_color = Color(0.105882, 0.129412, 0.188235, 0.941176)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.270588, 0.388235, 0.556863, 0.901961)
+corner_radius_top_left = 28
+corner_radius_top_right = 28
+corner_radius_bottom_right = 28
+corner_radius_bottom_left = 28
+shadow_color = Color(0, 0, 0, 0.35)
+shadow_size = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_pill"]
+bg_color = Color(0.145098, 0.192157, 0.286275, 0.921569)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.313726, 0.490196, 0.721569, 0.85098)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_button"]
+bg_color = Color(0.207843, 0.541176, 0.298039, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.560784, 0.913725, 0.623529, 0.960784)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
 
 [node name="Welcome" type="Control"]
 layout_mode = 3
@@ -22,6 +60,24 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.1, 0.11, 0.16, 1)
 
+[node name="GlowTop" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = -56.0
+offset_top = -48.0
+offset_right = 904.0
+offset_bottom = 248.0
+mouse_filter = 2
+color = Color(0.227451, 0.341176, 0.6, 0.18)
+
+[node name="GlowBottom" type="ColorRect" parent="."]
+layout_mode = 0
+offset_left = 760.0
+offset_top = 426.0
+offset_right = 1368.0
+offset_bottom = 832.0
+mouse_filter = 2
+color = Color(0.156863, 0.533333, 0.262745, 0.2)
+
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -30,26 +86,111 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBox" type="VBoxContainer" parent="Center"]
+[node name="Card" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(820, 520)
 layout_mode = 2
-theme_override_constants/separation = 20
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="Margin" type="MarginContainer" parent="Center/Card"]
+layout_mode = 2
+theme_override_constants/margin_left = 36
+theme_override_constants/margin_top = 32
+theme_override_constants/margin_right = 36
+theme_override_constants/margin_bottom = 32
+
+[node name="VBox" type="VBoxContainer" parent="Center/Card/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 24
 alignment = 1
 
-[node name="Title" type="Label" parent="Center/VBox"]
+[node name="Eyebrow" type="Label" parent="Center/Card/Margin/VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 52
-text = "Welcome"
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.584314, 0.705882, 0.960784, 0.901961)
+text = "GODOT 4 C# PROTOTYPE"
 horizontal_alignment = 1
 
-[node name="Subtitle" type="Label" parent="Center/VBox"]
+[node name="Title" type="Label" parent="Center/Card/Margin/VBox"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-theme_override_colors/font_color = Color(0.72, 0.76, 0.84, 1)
-text = "2D project — replace this screen when your game flow is ready."
+theme_override_font_sizes/font_size = 64
+text = "Snake Garden"
 horizontal_alignment = 1
 
-[node name="StartButton" type="Button" parent="Center/VBox"]
+[node name="Subtitle" type="Label" parent="Center/Card/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+theme_override_colors/font_color = Color(0.784314, 0.815686, 0.886275, 1)
+text = "Guide the snake across a clean arcade board, eat apples to grow, and stay away from your own tail."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="FeatureRow" type="HBoxContainer" parent="Center/Card/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 14
+alignment = 1
+
+[node name="ArrowCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
+
+[node name="ArrowLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/ArrowCard"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+text = "Arrow keys"
+
+[node name="GrowthCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
+
+[node name="GrowthLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/GrowthCard"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+text = "Grow every apple"
+
+[node name="RulesCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
+
+[node name="RulesLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/RulesCard"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+text = "No instant reverse"
+
+[node name="InfoPanel" type="PanelContainer" parent="Center/Card/Margin/VBox"]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
+
+[node name="InfoMargin" type="MarginContainer" parent="Center/Card/Margin/VBox/InfoPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="InfoText" type="Label" parent="Center/Card/Margin/VBox/InfoPanel/InfoMargin"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+theme_override_colors/font_color = Color(0.815686, 0.847059, 0.905882, 1)
+text = "Click Start to jump into the game scene. Each apple increases your length by one. Hitting the wall or your own body ends the run."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="StartButton" type="Button" parent="Center/Card/Margin/VBox"]
 unique_name_in_owner = true
 layout_mode = 2
-custom_minimum_size = Vector2(220, 44)
-text = "Start"
+custom_minimum_size = Vector2(260, 64)
+theme_override_font_sizes/font_size = 26
+theme_override_styles/normal = SubResource("StyleBoxFlat_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button")
+text = "Start Game"
+
+[node name="Footer" type="Label" parent="Center/Card/Margin/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+theme_override_colors/font_color = Color(0.588235, 0.635294, 0.713726, 1)
+text = "Built as a polished 2D prototype in Godot with C#."
+horizontal_alignment = 1

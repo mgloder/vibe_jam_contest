@@ -7,8 +7,9 @@ public partial class WelcomeScreen : Control
 
 	public override void _Ready()
 	{
-		var startButton = GetNode<Button>("Center/VBox/StartButton");
+		var startButton = GetNode<Button>("%StartButton");
 		startButton.Pressed += OnStartPressed;
+		startButton.GrabFocus();
 	}
 
 	private void OnStartPressed()
