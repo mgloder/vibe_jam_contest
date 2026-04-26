@@ -8,7 +8,7 @@ public partial class GridSimulator : Node2D
 	public int GridWidth { get; set; } = 960;
 
 	[Export]
-	public int GridHeight { get; set; } = 540;
+	public int GridHeight { get; set; } = 360;
 
 	/// <summary>Maximum pixels per simulation cell (when the window is large). The board is scaled down to fit the visible area to the left of the control panel.</summary>
 	[Export]
@@ -45,7 +45,7 @@ public partial class GridSimulator : Node2D
 	private Label? _statsLabel;
 	private Control? _topPanel;
 	private Control? _abilityBarPanel;
-	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> spawns the Servant on left click.</summary>
+	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> spawns a Servant on left click (each use adds one).</summary>
 	private Control? _abilityCardSlot1Holder;
 	private ProgressBar? _currencyBar;
 	private Label? _currencyValueLabel;
@@ -59,10 +59,11 @@ public partial class GridSimulator : Node2D
 	private static readonly Vector2I EnemyPursueNone = new(-1, -1);
 	private readonly List<float> _enemyRestSecondsRemaining = new();
 	private readonly List<Vector2I> _enemyPursueCells = new();
-	private Servant? _servant;
-	private Vector2I? _servantPursueCell;
-	private readonly Queue<Vector2I> _servantPathQueue = new();
-	private float _servantMoveBudget;
+	private readonly List<Servant> _servants = new();
+	private readonly List<Queue<Vector2I>> _servantPathQueues = new();
+	private readonly List<float> _servantMoveBudget = new();
+	private readonly List<float> _servantRestSecondsRemaining = new();
+	private readonly List<Vector2I> _servantPursueCells = new();
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
@@ -118,11 +119,14 @@ public partial class GridSimulator : Node2D
 	private const float PostAttackStopSec = 1f;
 	/// <summary>Min gap (px) between the sim board’s bottom and the top of the ability dock, in the same space as <see cref="_boardGridOrigin"/> (includes room under the 2px board stroke).</summary>
 	private const float AbilityBarTopClearancePx = 20f;
-	/// <summary>Currency cost for the Servant card (key 1 / first slot). Spawns the Servant at a new random valid anchor via <see cref="PlaceServant"/>.</summary>
+	/// <summary>Currency cost for the Servant card (key 1 / first slot). Each use adds a new Servant; existing ones are kept.</summary>
 	private const int ServantCardCurrencyCost = 6;
 	private const string GameOverScenePath = "res://scenes/game_over.tscn";
+	private const string WinGameScenePath = "res://scenes/win_game.tscn";
 	/// <summary>True after lose condition: queue <see cref="GameOverScenePath"/> (see <see cref="TryTriggerGameOver"/>).</summary>
 	private bool _gameOverSceneQueued;
+	/// <summary>True when victory is queued; blocks game over in the same run.</summary>
+	private bool _winGameSceneQueued;
 
 	/// <summary>Lowest token cost among ability cards; lose if below this with no living Servant.</summary>
 	public static int GetMinAbilityCardTokenCost() => ServantCardCurrencyCost;
@@ -144,7 +148,6 @@ public partial class GridSimulator : Node2D
 		['L'] = new Color(0.22f, 0.24f, 0.30f)  // limbs
 	};
 
-	private float _servantRestSecondsRemaining;
 	/// <summary>Pixels per grid cell for drawing and on-screen fit; ≤ <see cref="CellSize"/>, never larger than needed to fit the window.</summary>
 	private float _boardPixelsPerCell = 1f;
 	private Vector2 _boardGridOrigin;
@@ -198,7 +201,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
-		// Scene starts without a Servant; use PlaceServant() from gameplay or terrain tools when you add that flow.
+		// Scene starts without Servants; use the ability card to add them.
 		EnsureCharacterDestinationsAreValid();
 		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
@@ -238,7 +241,7 @@ public partial class GridSimulator : Node2D
 			return;
 		}
 
-		// First ability slot: spend currency and re-place the Servant at a random valid location.
+		// First ability slot: spend currency and spawn an additional Servant.
 		if (key.Keycode is Key.Key1 or Key.Kp1)
 		{
 			if (TryUseServantCard())
@@ -246,13 +249,13 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Pay <see cref="ServantCardCurrencyCost"/> and call <see cref="PlaceServant"/> if the player can afford it.</summary>
+	/// <summary>Pay <see cref="ServantCardCurrencyCost"/> and call <see cref="AddServant"/> if the player can afford it.</summary>
 	private bool TryUseServantCard()
 	{
 		if (_playerCurrency < ServantCardCurrencyCost)
 			return false;
 		PlayerCurrency = _playerCurrency - ServantCardCurrencyCost;
-		PlaceServant();
+		AddServant();
 		UpdateHud();
 		QueueRedraw();
 		return true;
@@ -269,7 +272,9 @@ public partial class GridSimulator : Node2D
 	public override void _Process(double delta)
 	{
 		var d = (float)delta;
-		_servantRestSecondsRemaining = Mathf.Max(0f, _servantRestSecondsRemaining - d);
+		EnsureServantStateSize();
+		for (var si = 0; si < _servantRestSecondsRemaining.Count; si++)
+			_servantRestSecondsRemaining[si] = Mathf.Max(0f, _servantRestSecondsRemaining[si] - d);
 		EnsureEnemyPathStateSize();
 		for (var ei = 0; ei < _enemies.Count; ei++)
 			_enemyRestSecondsRemaining[ei] = Mathf.Max(0f, _enemyRestSecondsRemaining[ei] - d);
@@ -296,6 +301,7 @@ public partial class GridSimulator : Node2D
 				QueueRedraw();
 			}
 			_processHasRun = true;
+			TryTriggerWin();
 			TryTriggerGameOver();
 			return;
 		}
@@ -310,19 +316,57 @@ public partial class GridSimulator : Node2D
 		_processHasRun = true;
 		UpdateHud();
 		QueueRedraw();
+		TryTriggerWin();
 		TryTriggerGameOver();
+	}
+
+	/// <summary>Victory: at least one enemy was on the board, all are dead, and at least one colonist is alive. Skips if no enemies (avoids instant win on empty list).</summary>
+	private void TryTriggerWin()
+	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return;
+		if (_enemies.Count == 0)
+			return;
+		for (var ei = 0; ei < _enemies.Count; ei++)
+		{
+			if (_enemies[ei].Health > 0)
+				return;
+		}
+		var anyColonist = false;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			if (_characters[i].Health > 0)
+			{
+				anyColonist = true;
+				break;
+			}
+		}
+		if (!anyColonist)
+			return;
+		_winGameSceneQueued = true;
+		SetProcess(false);
+		CallDeferred(nameof(DeferredChangeToWin));
+	}
+
+	private void DeferredChangeToWin()
+	{
+		var err = GetTree().ChangeSceneToFile(WinGameScenePath);
+		if (err != Error.Ok)
+			GD.PrintErr("Win game scene failed: ", err);
 	}
 
 	/// <summary>Transition when tokens cannot afford the cheapest card and there is no living Servant.</summary>
 	private void TryTriggerGameOver()
 	{
-		if (_gameOverSceneQueued)
+		if (_gameOverSceneQueued || _winGameSceneQueued)
 			return;
 		if (_playerCurrency >= GetMinAbilityCardTokenCost())
 			return;
-		var hasServant = _servant != null && _servant.Health > 0;
-		if (hasServant)
-			return;
+		for (var i = 0; i < _servants.Count; i++)
+		{
+			if (_servants[i].Health > 0)
+				return;
+		}
 		_gameOverSceneQueued = true;
 		SetProcess(false);
 		CallDeferred(nameof(DeferredChangeToGameOver));
@@ -381,8 +425,11 @@ public partial class GridSimulator : Node2D
 					DrawCharacterDestinationForEnemy(_enemies[ei], origin);
 				DrawEnemy(_enemies[ei], origin);
 			}
-			if (_servant != null)
-				DrawServant(_servant, origin, drawDead: _servant.Health <= 0);
+			for (var si = 0; si < _servants.Count; si++)
+			{
+				var sv = _servants[si];
+				DrawServant(sv, origin, drawDead: sv.Health <= 0);
+			}
 		}
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
 	}
@@ -784,7 +831,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
-		PlaceServant();
+		RelocateAllServantsToWalkable();
 		EnsureCharacterDestinationsAreValid();
 		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
@@ -821,7 +868,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
-		EnsureServantOnWalkable();
+		RelocateAllServantsToWalkable();
 		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
@@ -839,7 +886,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
-		PlaceServant();
+		RelocateAllServantsToWalkable();
 		EnsureCharacterDestinationsAreValid();
 		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
@@ -1107,28 +1154,66 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Spawn/refresh the Cthulhu token at a random valid anchor; BFS finds a walkable anchor cell (same single-cell rules as other units).</summary>
-	private void PlaceServant()
+	/// <summary>Append a Servant on a new anchor, avoiding other servants’ cells.</summary>
+	private void AddServant()
 	{
-		var start = FindRandomValidDestinationCell();
+		var newIndex = _servants.Count;
+		var taken = new HashSet<Vector2I>();
+		for (var j = 0; j < _servants.Count; j++)
+			taken.Add(_servants[j].Cell);
+		var start = FindRandomValidDestinationCell(null, taken);
 		var proto = Servant.CreateAt(start);
-		var cell = FindNearestCellSatisfying(start, a => IsWalkableForServantAnchorCell(proto, a));
+		var cell = FindNearestCellSatisfying(start, a =>
+			IsWalkableForServantAnchorCell(proto, a) && !IsCellOccupiedByOtherServant(a, newIndex));
 		proto.Cell = cell;
-		_servant = proto;
-		_servantPursueCell = null;
-		_servantPathQueue.Clear();
-		_servantMoveBudget = 0f;
-		_servantRestSecondsRemaining = 0f;
+		_servants.Add(proto);
+		_servantPathQueues.Add(new Queue<Vector2I>());
+		_servantMoveBudget.Add(0f);
+		_servantRestSecondsRemaining.Add(0f);
+		_servantPursueCells.Add(EnemyPursueNone);
 	}
 
-	private void EnsureServantOnWalkable()
+	private void EnsureServantStateSize()
 	{
-		if (_servant == null)
-			return;
-		if (IsWalkableForServantAnchorCell(_servant, _servant.Cell))
-			return;
-		_servant.Cell = FindNearestCellSatisfying(_servant.Cell, a => IsWalkableForServantAnchorCell(_servant, a));
+		while (_servantPathQueues.Count < _servants.Count)
+		{
+			_servantPathQueues.Add(new Queue<Vector2I>());
+			_servantMoveBudget.Add(0f);
+			_servantRestSecondsRemaining.Add(0f);
+			_servantPursueCells.Add(EnemyPursueNone);
+		}
 	}
+
+	private static bool IsCellOccupiedByOtherServant(Vector2I cell, IReadOnlyList<Servant> servants, int exceptIndex)
+	{
+		for (var j = 0; j < servants.Count; j++)
+		{
+			if (j == exceptIndex)
+				continue;
+			if (servants[j].Cell == cell)
+				return true;
+		}
+		return false;
+	}
+
+	private bool IsCellOccupiedByOtherServant(Vector2I cell, int exceptIndex) =>
+		IsCellOccupiedByOtherServant(cell, _servants, exceptIndex);
+
+	/// <summary>After terrain changes, keep every Servant on a valid, non-overlapping anchor.</summary>
+	private void RelocateAllServantsToWalkable()
+	{
+		EnsureServantStateSize();
+		for (var i = 0; i < _servants.Count; i++)
+		{
+			var s = _servants[i];
+			if (IsValidServantAnchorForIndex(i, s.Cell))
+				continue;
+			s.Cell = FindNearestCellSatisfying(s.Cell, a => IsValidServantAnchorForIndex(i, a));
+		}
+	}
+
+	private bool IsValidServantAnchorForIndex(int i, Vector2I a) =>
+		IsWalkableForServantAnchorCell(_servants[i], a) && !IsCellOccupiedByOtherServant(a, i);
 
 	private void OnCharacterDied(int index)
 	{
@@ -1726,9 +1811,14 @@ public partial class GridSimulator : Node2D
 					continue;
 				pool.Add((ManhattanDistance(a.Cell, e.Cell), ColonyAttackPoolKind.Enemy, ei));
 			}
-			if (ColonyStrikerCanDamageServant(a) && _servant != null && _servant.Health > 0 &&
-			    ChebyshevDistance(a.Cell, _servant.Cell) <= rFine)
-				pool.Add((ManhattanDistance(a.Cell, _servant.Cell), ColonyAttackPoolKind.Servant, 0));
+			for (var si = 0; si < _servants.Count; si++)
+			{
+				var sv = _servants[si];
+				if (sv.Health <= 0)
+					continue;
+				if (ColonyStrikerCanDamageServant(a) && ChebyshevDistance(a.Cell, sv.Cell) <= rFine)
+					pool.Add((ManhattanDistance(a.Cell, sv.Cell), ColonyAttackPoolKind.Servant, si));
+			}
 			pool.Sort((x, y) => x.manh.CompareTo(y.manh));
 			var hits = 0;
 			for (var p = 0; p < pool.Count && hits < a.MaxAttackTargets; p++)
@@ -1737,9 +1827,16 @@ public partial class GridSimulator : Node2D
 				switch (item.kind)
 				{
 					case ColonyAttackPoolKind.Servant:
-						_servant!.Health = Mathf.Max(0, _servant.Health - a.Attack);
+					{
+						if (item.index < 0 || item.index >= _servants.Count)
+							continue;
+						var sv = _servants[item.index];
+						if (sv.Health <= 0)
+							continue;
+						sv.Health = Mathf.Max(0, sv.Health - a.Attack);
 						hits++;
 						break;
+					}
 					case ColonyAttackPoolKind.Enemy:
 					{
 						var e = _enemies[item.index];
@@ -1762,120 +1859,127 @@ public partial class GridSimulator : Node2D
 	/// <summary>Only attack-capable colonists (Expert, Soldier) can damage the Servant at range.</summary>
 	private static bool ColonyStrikerCanDamageServant(ColonyCharacter a) => a.CanAttack;
 
-	/// <summary>Chase the closest living <see cref="ColonyCharacter"/>; melee when within design 3×3 (one major ring on this sim grid).</summary>
+	/// <summary>Each living Servant chases the closest colonist; melee on the fine grid’s 3×3 ring at design r=1.</summary>
 	private void StepServant()
 	{
-		if (_servant is not { } servant)
-			return;
-		if (servant.Health <= 0)
+		EnsureServantStateSize();
+		for (var si = 0; si < _servants.Count; si++)
 		{
-			_servantPathQueue.Clear();
-			return;
-		}
-		if (_servantRestSecondsRemaining > 0f)
-			return;
-
-		if (!TryGetServantChaseTarget(out var target, out var targetIndex))
-		{
-			_servantPathQueue.Clear();
-			return;
-		}
-
-		var servantMeleeRFine = GetCombatChebyshevRadiusInFineCells(1);
-		if (ChebyshevDistance(servant.Cell, target.Cell) <= servantMeleeRFine)
-		{
-			_servantPathQueue.Clear();
-			if (target.IsAlive)
+			var servant = _servants[si];
+			var pathQueue = _servantPathQueues[si];
+			if (servant.Health <= 0)
 			{
-				var h = target.Health;
-				target.Health = Mathf.Max(0, h - Servant.AttackDamage);
-				if (h > 0 && !target.IsAlive)
-					OnCharacterDied(targetIndex);
-				_servantRestSecondsRemaining = PostAttackStopSec;
-			}
-			return;
-		}
-
-		if (_servantPathQueue.Count == 0 || _servantPursueCell != target.Cell)
-		{
-			_servantPursueCell = target.Cell;
-			ReplanServantPath(target.Cell);
-		}
-
-		if (_servantPathQueue.Count == 0)
-			return;
-
-		_servantMoveBudget += MovementBudgetPerGridMajorStep * (Servant.MajorStepsPerSecond / 2f);
-		var moved = false;
-		var servantConsumeIters = 0;
-		while (_servantMoveBudget > 0f && servantConsumeIters < MaxPathConsumeIterationsPerUnit)
-		{
-			servantConsumeIters++;
-			if (_servantPathQueue.Count == 0)
-			{
-				if (!ReplanServantPath(target.Cell))
-					break;
-				if (_servantPathQueue.Count == 0)
-					break;
-			}
-
-			var next = _servantPathQueue.Peek();
-			var d = Mathf.Abs(next.X - servant.Cell.X) + Mathf.Abs(next.Y - servant.Cell.Y);
-			if (d != 1)
-			{
-				ReplanServantPath(target.Cell);
-				if (_servantPathQueue.Count == 0)
-					break;
+				pathQueue.Clear();
 				continue;
 			}
 
-			if (!IsWalkableForServantAnchorCell(next))
+			if (_servantRestSecondsRemaining[si] > 0f)
+				continue;
+
+			if (!TryGetServantChaseTarget(servant, out var target, out var targetIndex))
 			{
-				ReplanServantPath(target.Cell);
-				if (_servantPathQueue.Count == 0)
-					break;
+				pathQueue.Clear();
 				continue;
 			}
 
-			var cost = (float)GetPathMoveCost(next);
-			if (cost <= 0f)
-				break;
-			if (_servantMoveBudget < cost)
-				break;
+			var servantMeleeRFine = GetCombatChebyshevRadiusInFineCells(1);
+			if (ChebyshevDistance(servant.Cell, target!.Cell) <= servantMeleeRFine)
+			{
+				pathQueue.Clear();
+				if (target.IsAlive)
+				{
+					var h = target.Health;
+					target.Health = Mathf.Max(0, h - Servant.AttackDamage);
+					if (h > 0 && !target.IsAlive)
+						OnCharacterDied(targetIndex);
+					_servantRestSecondsRemaining[si] = PostAttackStopSec;
+				}
+				continue;
+			}
 
-			_servantMoveBudget -= cost;
-			_servantPathQueue.Dequeue();
-			servant.Cell = next;
-			moved = true;
+			if (pathQueue.Count == 0 || _servantPursueCells[si] != target.Cell)
+			{
+				_servantPursueCells[si] = target.Cell;
+				ReplanServantPath(si, target.Cell);
+			}
+
+			if (pathQueue.Count == 0)
+				continue;
+
+			_servantMoveBudget[si] += MovementBudgetPerGridMajorStep * (Servant.MajorStepsPerSecond / 2f);
+			var moved = false;
+			var servantConsumeIters = 0;
+			while (_servantMoveBudget[si] > 0f && servantConsumeIters < MaxPathConsumeIterationsPerUnit)
+			{
+				servantConsumeIters++;
+				if (pathQueue.Count == 0)
+				{
+					if (!ReplanServantPath(si, target.Cell))
+						break;
+					if (pathQueue.Count == 0)
+						break;
+				}
+
+				var next = pathQueue.Peek();
+				var d = Mathf.Abs(next.X - servant.Cell.X) + Mathf.Abs(next.Y - servant.Cell.Y);
+				if (d != 1)
+				{
+					ReplanServantPath(si, target.Cell);
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+
+				if (!IsWalkableForServantPathCell(si, next))
+				{
+					ReplanServantPath(si, target.Cell);
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+
+				var cost = (float)GetPathMoveCost(next);
+				if (cost <= 0f)
+					break;
+				if (_servantMoveBudget[si] < cost)
+					break;
+
+				_servantMoveBudget[si] -= cost;
+				pathQueue.Dequeue();
+				servant.Cell = next;
+				moved = true;
+			}
+
+			if (moved && servant.Cell == target.Cell)
+				pathQueue.Clear();
 		}
-
-		if (moved && servant.Cell == target.Cell)
-			_servantPathQueue.Clear();
 	}
 
-	private bool ReplanServantPath(Vector2I destination)
+	private bool ReplanServantPath(int servantIndex, Vector2I destination)
 	{
-		if (_servant == null)
+		if (servantIndex < 0 || servantIndex >= _servants.Count)
 			return false;
-		_servantPathQueue.Clear();
-		_servantMoveBudget = 0f;
+		var pathQueue = _servantPathQueues[servantIndex];
+		var s = _servants[servantIndex];
+		pathQueue.Clear();
+		_servantMoveBudget[servantIndex] = 0f;
 
-		if (_servant.Cell == destination)
+		if (s.Cell == destination)
 			return true;
 
 		var fullPath = GridAStar.FindPath(
 			GridWidth,
 			GridHeight,
-			_servant.Cell,
+			s.Cell,
 			destination,
-			c => IsWalkableForServantAnchorCell(c),
+			c => IsWalkableForServantPathCell(servantIndex, c),
 			GetPathMoveCost
 		);
 		if (fullPath == null)
 			return false;
 
-		for (var s = 1; s < fullPath.Count; s++)
-			_servantPathQueue.Enqueue(fullPath[s]);
+		for (var n = 1; n < fullPath.Count; n++)
+			pathQueue.Enqueue(fullPath[n]);
 
 		return true;
 	}
@@ -1911,18 +2015,17 @@ public partial class GridSimulator : Node2D
 		return true;
 	}
 
-	/// <summary>Nearest living NPC by anchor <see cref="ColonyCharacter.Cell"/> Manhattan; ties favor lower list index.</summary>
-	private bool TryGetServantChaseTarget(out ColonyCharacter? target, out int index)
+	/// <summary>Nearest living colonist to this Servant by anchor Manhattan; ties favor lower list index.</summary>
+	private static bool TryGetNearestLivingColonistForServantChase(
+		Servant s, IReadOnlyList<ColonyCharacter> characters, out ColonyCharacter? target, out int index)
 	{
 		target = null;
 		index = -1;
-		if (_servant is not { } s)
-			return false;
 		ColonyCharacter? best = null;
 		var bestD = int.MaxValue;
-		for (var i = 0; i < _characters.Count; i++)
+		for (var i = 0; i < characters.Count; i++)
 		{
-			var c = _characters[i];
+			var c = characters[i];
 			if (!c.IsAlive)
 				continue;
 			var d = ManhattanDistance(s.Cell, c.Cell);
@@ -1938,6 +2041,9 @@ public partial class GridSimulator : Node2D
 		target = best;
 		return true;
 	}
+
+	private bool TryGetServantChaseTarget(Servant s, out ColonyCharacter? target, out int index) =>
+		TryGetNearestLivingColonistForServantChase(s, _characters, out target, out index);
 
 	private Vector2I FindNewDestinationAfterArrival(ColonyCharacter c) =>
 		c.Type == ColonyCharacterType.Civilian
@@ -1975,11 +2081,17 @@ public partial class GridSimulator : Node2D
 		return IsWalkableCharacterCell(anchorCell);
 	}
 
-	/// <summary>Current Servant; same single-cell walkable rules as <see cref="IsWalkableForServantAnchorCell(Servant,Vector2I)"/>.</summary>
-	private bool IsWalkableForServantAnchorCell(Vector2I anchorCell) =>
-		_servant != null && IsWalkableForServantAnchorCell(_servant, anchorCell);
+	/// <summary>Walkable terrain, and the cell is not the anchor of another Servant (other than <paramref name="servantIndex"/>).</summary>
+	private bool IsWalkableForServantPathCell(int servantIndex, Vector2I cell)
+	{
+		if (servantIndex < 0 || servantIndex >= _servants.Count)
+			return false;
+		if (!IsWalkableForServantAnchorCell(_servants[servantIndex], cell))
+			return false;
+		return !IsCellOccupiedByOtherServant(cell, servantIndex);
+	}
 
-	/// <summary>Attack-capable units (and the Servant while alive) are treated as threats for flee targeting.</summary>
+	/// <summary>Attack-capable units (and living Servants) are treated as threats for flee targeting.</summary>
 	private List<Vector2I> GetEnemyCellsForCivilian(ColonyCharacter self)
 	{
 		var list = new List<Vector2I>();
@@ -1991,8 +2103,11 @@ public partial class GridSimulator : Node2D
 			if (o.CanAttack && o.Health > 0)
 				list.Add(o.Cell);
 		}
-		if (_servant != null && _servant.Health > 0)
-			list.Add(_servant.Cell);
+		for (var si = 0; si < _servants.Count; si++)
+		{
+			if (_servants[si].Health > 0)
+				list.Add(_servants[si].Cell);
+		}
 		for (var e = 0; e < _enemies.Count; e++)
 		{
 			var en = _enemies[e];
