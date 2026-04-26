@@ -20,14 +20,14 @@ border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
 border_color = Color(0.32, 0.48, 0.64, 0.9)
-corner_radius_top_left = 6
-corner_radius_top_right = 6
-corner_radius_bottom_right = 6
-corner_radius_bottom_left = 6
-content_margin_left = 6
-content_margin_top = 6
-content_margin_right = 6
-content_margin_bottom = 6
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 3
+content_margin_top = 3
+content_margin_right = 3
+content_margin_bottom = 3
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_grid_sim")
@@ -94,14 +94,14 @@ horizontal_alignment = 2
 vertical_alignment = 1
 
 [node name="AbilityBar" type="PanelContainer" parent="UI"]
-clip_contents = true
+clip_contents = false
 layout_mode = 1
 anchor_left = 0.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 0.0
-offset_top = -200.0
+offset_top = -140.0
 offset_right = 0.0
 offset_bottom = 0.0
 grow_horizontal = 2
@@ -109,19 +109,19 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_ability_dock")
 
 [node name="AbilityMargin" type="MarginContainer" parent="UI/AbilityBar"]
 layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 10
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 6
+theme_override_constants/margin_bottom = 5
 
 [node name="AbilityCardRow" type="HBoxContainer" parent="UI/AbilityBar/AbilityMargin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 5
 alignment = 1
 
 [node name="AbilityCardHolder1" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(64, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
@@ -135,36 +135,39 @@ layout_mode = 0
 size_flags_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
 
-[node name="Card1VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCard1"]
+[node name="Card1VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1"]
 layout_mode = 1
+mouse_filter = 2
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 6.0
-offset_right = -6.0
-offset_bottom = -6.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
 grow_vertical = 2
-theme_override_constants/separation = 3
+theme_override_constants/separation = 2
 
 [node name="TopRow1" type="HBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
 layout_mode = 2
 size_flags_vertical = 0
-theme_override_constants/separation = 6
+mouse_filter = 2
+theme_override_constants/separation = 3
 
 [node name="AbilityName1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox/TopRow1"]
-unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 12
-text = "Soul Whisper"
+mouse_filter = 2
+theme_override_font_sizes/font_size = 9
+text = "Servant"
 autowrap_mode = 0
 vertical_alignment = 1
 
 [node name="AbilityKey1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox/TopRow1"]
 layout_mode = 2
-custom_minimum_size = Vector2(18, 0)
-theme_override_font_sizes/font_size = 10
+custom_minimum_size = Vector2(14, 0)
+mouse_filter = 2
+theme_override_font_sizes/font_size = 7
 theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 0.9)
 text = "1"
 horizontal_alignment = 2
@@ -173,40 +176,25 @@ vertical_alignment = 1
 [node name="AbilityCost1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
 layout_mode = 2
 size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
+mouse_filter = 2
+theme_override_font_sizes/font_size = 7
 theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Cost: 3 currency"
-autowrap_mode = 2
+text = "6 points"
+autowrap_mode = 0
 
-[node name="AbilityCooldown1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
+[node name="AbilityDesc1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
 layout_mode = 2
 size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Cooldown: 10 s"
-autowrap_mode = 2
-
-[node name="AbilitySlotInfo1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
-layout_mode = 2
-size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.6, 0.78, 0.6, 0.95)
-text = "Slot / unlock: slot 1, unlocked from the start"
-autowrap_mode = 2
-
-[node name="AbilityFlavor1" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1/AbilityCard1/Card1VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 9
-theme_override_colors/font_color = Color(0.82, 0.8, 0.72, 0.98)
-text = "Card: Soul Whisper — civilians in the selected area are driven to frenzy for you and help you reap lives."
+mouse_filter = 2
+theme_override_font_sizes/font_size = 6
+theme_override_colors/font_color = Color(0.82, 0.8, 0.72, 0.95)
+text = "Spawns a Servant at a random valid spot. Click the slot or press 1 (when you can pay)."
 autowrap_mode = 2
 vertical_alignment = 0
 
 [node name="AbilityCardHolder2" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(64, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
@@ -220,78 +208,9 @@ layout_mode = 0
 size_flags_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
 
-[node name="Card2VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCard2"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 6.0
-offset_right = -6.0
-offset_bottom = -6.0
-grow_vertical = 2
-theme_override_constants/separation = 3
-
-[node name="TopRow2" type="HBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox"]
-layout_mode = 2
-size_flags_vertical = 0
-theme_override_constants/separation = 6
-
-[node name="AbilityName2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox/TopRow2"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_horizontal = 3
-theme_override_font_sizes/font_size = 12
-text = "Servant Arrival"
-autowrap_mode = 0
-vertical_alignment = 1
-
-[node name="AbilityKey2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox/TopRow2"]
-layout_mode = 2
-custom_minimum_size = Vector2(18, 0)
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 0.9)
-text = "2"
-horizontal_alignment = 2
-vertical_alignment = 1
-
-[node name="AbilityCost2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox"]
-layout_mode = 2
-size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Cost: 6 currency"
-autowrap_mode = 2
-
-[node name="AbilityCooldown2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox"]
-layout_mode = 2
-size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Cooldown: 10 s"
-autowrap_mode = 2
-
-[node name="AbilitySlotInfo2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox"]
-layout_mode = 2
-size_flags_vertical = 0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.6, 0.78, 0.6, 0.95)
-text = "Slot / unlock: slot 2, unlocked from the start"
-autowrap_mode = 2
-
-[node name="AbilityFlavor2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2VBox"]
-unique_name_in_owner = true
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 9
-theme_override_colors/font_color = Color(0.82, 0.8, 0.72, 0.98)
-text = "Card: Servant Arrival — a Servant descends and begins devouring the living."
-autowrap_mode = 2
-vertical_alignment = 0
-
 [node name="AbilityCardHolder3" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(64, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
@@ -305,37 +224,9 @@ layout_mode = 0
 size_flags_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
 
-[node name="Card3VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCard3"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 6.0
-offset_right = -6.0
-offset_bottom = -6.0
-grow_vertical = 2
-theme_override_constants/separation = 2
-
-[node name="AbilityTitle3" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder3/AbilityCard3/Card3VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
-text = "—"
-autowrap_mode = 2
-vertical_alignment = 1
-
-[node name="AbilityKey3" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder3/AbilityCard3/Card3VBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 0.9)
-text = "3"
-horizontal_alignment = 1
-vertical_alignment = 1
-
 [node name="AbilityCardHolder4" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(64, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
@@ -349,37 +240,9 @@ layout_mode = 0
 size_flags_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
 
-[node name="Card4VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCard4"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 6.0
-offset_right = -6.0
-offset_bottom = -6.0
-grow_vertical = 2
-theme_override_constants/separation = 2
-
-[node name="AbilityTitle4" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder4/AbilityCard4/Card4VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
-text = "—"
-autowrap_mode = 2
-vertical_alignment = 1
-
-[node name="AbilityKey4" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder4/AbilityCard4/Card4VBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 0.9)
-text = "4"
-horizontal_alignment = 1
-vertical_alignment = 1
-
 [node name="AbilityCardHolder5" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false
-custom_minimum_size = Vector2(0, 150)
+custom_minimum_size = Vector2(64, 105)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 1
@@ -392,31 +255,3 @@ custom_minimum_size = Vector2(0, 0)
 layout_mode = 0
 size_flags_vertical = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
-
-[node name="Card5VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCard5"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = 6.0
-offset_top = 6.0
-offset_right = -6.0
-offset_bottom = -6.0
-grow_vertical = 2
-theme_override_constants/separation = 2
-
-[node name="AbilityTitle5" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder5/AbilityCard5/Card5VBox"]
-layout_mode = 2
-size_flags_vertical = 3
-theme_override_font_sizes/font_size = 12
-text = "—"
-autowrap_mode = 2
-vertical_alignment = 1
-
-[node name="AbilityKey5" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder5/AbilityCard5/Card5VBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 0.9)
-text = "5"
-horizontal_alignment = 1
-vertical_alignment = 1

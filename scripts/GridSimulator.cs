@@ -45,6 +45,8 @@ public partial class GridSimulator : Node2D
 	private Label? _statsLabel;
 	private Control? _topPanel;
 	private Control? _abilityBarPanel;
+	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> spawns the Servant on left click.</summary>
+	private Control? _abilityCardSlot1Holder;
 	private ProgressBar? _currencyBar;
 	private Label? _currencyValueLabel;
 	private GridControlPanel? _controlPanel;
@@ -112,6 +114,10 @@ public partial class GridSimulator : Node2D
 	private const int ForestTerrainMoveCost = 2; // 0.5x speed
 	/// <summary>Seconds the Servant pauses after a strike (no move, no attack).</summary>
 	private const float ServantPostAttackStopSec = 1f;
+	/// <summary>Min gap (px) between the sim board’s bottom and the top of the ability dock, in the same space as <see cref="_boardGridOrigin"/> (includes room under the 2px board stroke).</summary>
+	private const float AbilityBarTopClearancePx = 20f;
+	/// <summary>Currency cost for the Servant card (key 1 / first slot). Spawns the Servant at a new random valid anchor via <see cref="PlaceServant"/>.</summary>
+	private const int ServantCardCurrencyCost = 6;
 	private static readonly string[] LayingDownSpriteRows =
 	{
 		"....SSSSS....",
@@ -141,6 +147,9 @@ public partial class GridSimulator : Node2D
 		_statsLabel = GetNodeOrNull<Label>("%StatsLabel");
 		_topPanel = GetNodeOrNull<Control>("UI/TopPanel");
 		_abilityBarPanel = GetNodeOrNull<Control>("UI/AbilityBar");
+		_abilityCardSlot1Holder = GetNodeOrNull<Control>("UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1");
+		if (_abilityCardSlot1Holder != null)
+			_abilityCardSlot1Holder.GuiInput += OnFirstAbilitySlotGuiInput;
 		_controlPanel = GetNodeOrNull<GridControlPanel>("%ControlPanel");
 		_currencyBar = GetNodeOrNull<ProgressBar>("%CurrencyBar");
 		_currencyValueLabel = GetNodeOrNull<Label>("%CurrencyValueLabel");
@@ -196,6 +205,12 @@ public partial class GridSimulator : Node2D
 		QueueRedraw();
 	}
 
+	public override void _ExitTree()
+	{
+		if (_abilityCardSlot1Holder != null)
+			_abilityCardSlot1Holder.GuiInput -= OnFirstAbilitySlotGuiInput;
+	}
+
 	public override void _UnhandledInput(InputEvent @event)
 	{
 		if (@event is not InputEventKey key || !key.Pressed || key.Echo)
@@ -208,7 +223,35 @@ public partial class GridSimulator : Node2D
 			UpdateHud();
 			QueueRedraw();
 			GetViewport().SetInputAsHandled();
+			return;
 		}
+
+		// First ability slot: spend currency and re-place the Servant at a random valid location.
+		if (key.Keycode is Key.Key1 or Key.Kp1)
+		{
+			if (TryUseServantCard())
+				GetViewport().SetInputAsHandled();
+		}
+	}
+
+	/// <summary>Pay <see cref="ServantCardCurrencyCost"/> and call <see cref="PlaceServant"/> if the player can afford it.</summary>
+	private bool TryUseServantCard()
+	{
+		if (_playerCurrency < ServantCardCurrencyCost)
+			return false;
+		PlayerCurrency = _playerCurrency - ServantCardCurrencyCost;
+		PlaceServant();
+		UpdateHud();
+		QueueRedraw();
+		return true;
+	}
+
+	private void OnFirstAbilitySlotGuiInput(InputEvent @event)
+	{
+		if (@event is not InputEventMouseButton mb || !mb.Pressed || mb.ButtonIndex != MouseButton.Left)
+			return;
+		if (TryUseServantCard())
+			_abilityCardSlot1Holder?.AcceptEvent();
 	}
 
 	public override void _Process(double delta)
@@ -523,9 +566,13 @@ public partial class GridSimulator : Node2D
 		var topPadding = 16f;
 		var bottomPadding = 16f;
 		var topBound = topPanelBottom + topPadding;
+		// _Draw() uses this node's local space. Top of the ability bar in local coords matches the bottom limit for the sim board when the Game node is the default (0,0) canvas.
 		var bottomOfPlayArea = v.Y - bottomPadding;
 		if (_abilityBarPanel != null)
-			bottomOfPlayArea = _abilityBarPanel.GetGlobalRect().Position.Y - 8f;
+		{
+			var barTopGlobal = _abilityBarPanel.GetGlobalRect().Position;
+			bottomOfPlayArea = ToLocal(barTopGlobal).Y - AbilityBarTopClearancePx;
+		}
 		var availableHeight = Mathf.Max(0f, bottomOfPlayArea - topBound);
 		var fitW = availableWidth / Mathf.Max(1, GridWidth);
 		var fitH = availableHeight / Mathf.Max(1, GridHeight);
@@ -536,6 +583,8 @@ public partial class GridSimulator : Node2D
 		var x = Mathf.Floor(leftPadding + (availableWidth - boardWidth) * 0.5f);
 		x = Mathf.Max(leftPadding, x);
 		var y = Mathf.Floor(topBound + (availableHeight - boardHeight) * 0.5f);
+		var maxY = bottomOfPlayArea - boardHeight;
+		y = Mathf.Min(y, maxY);
 		y = Mathf.Max(topBound, y);
 		_boardGridOrigin = new Vector2(x, y);
 	}

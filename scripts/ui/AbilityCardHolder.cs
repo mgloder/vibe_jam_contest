@@ -1,12 +1,14 @@
 using Godot;
 
 /// <summary>
-/// Wraps an ability <see cref="Panel"/> in the bottom bar. On hover, lifts the card (y-offset) and raises z-index. Parent is an <c>HBox</c> child; the panel is sized and positioned in code so the lift is not fighting container layout.
+/// Wraps an ability <see cref="Panel"/> in the bottom bar. The panel uses position layout and is resized to
+/// <see cref="Size"/> on every <see cref="Resized"/> so labels always get the slot width. Hover lifts via
+/// <see cref="Control.Position"/>.(y).
 /// </summary>
 public partial class AbilityCardHolder : Control
 {
-	[Export] public float HoverLiftPixels { get; set; } = 6f;
-	[Export] public double HoverTweenSec { get; set; } = 0.12;
+	[Export] public float HoverLiftPixels { get; set; } = 3f;
+	[Export] public double HoverTweenSec { get; set; } = 0.1;
 
 	private Control? _card;
 	private Tween? _tween;
@@ -29,6 +31,7 @@ public partial class AbilityCardHolder : Control
 		MouseEntered += OnMouseEntered;
 		MouseExited += OnMouseExited;
 		OnSlotResized();
+		Callable.From(OnSlotResized).CallDeferred();
 	}
 
 	public override void _ExitTree()
@@ -42,7 +45,7 @@ public partial class AbilityCardHolder : Control
 	{
 		if (_card == null)
 			return;
-		_card.SetSize(Size);
+		_card.Size = Size;
 		ApplyVisualLift(animate: false);
 	}
 
