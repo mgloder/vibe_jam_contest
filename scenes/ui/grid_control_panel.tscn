@@ -158,14 +158,3 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 text = "Remove Water"
 
-[node name="RoadButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1984394602]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 26)
-layout_mode = 2
-text = "Remove Road"
-
-[node name="BuildingButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1233154975]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 26)
-layout_mode = 2
-text = "Remove Building"

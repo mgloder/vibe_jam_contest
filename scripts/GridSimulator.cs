@@ -58,7 +58,6 @@ public partial class GridSimulator : Node2D
 
 		_terrain = new TerrainType[GridWidth, GridHeight];
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
-		RemoveAllBuildingsFromBoard();
 		_buildingGrowthTimer = new Timer();
 		_buildingGrowthTimer.WaitTime = BuildingGrowthIntervalSec;
 		_buildingGrowthTimer.OneShot = false;
@@ -68,6 +67,7 @@ public partial class GridSimulator : Node2D
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
 		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
+		GenerateRandomBuildingsAfterTerrain(2);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		UpdateHud();
@@ -103,7 +103,10 @@ public partial class GridSimulator : Node2D
 			for (var x = 0; x < GridWidth; x++)
 			{
 				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
-				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
+				var cell = new Vector2I(x, y);
+				var color = _buildingCells.Contains(cell)
+					? BuildingCellColor(x, y)
+					: TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
 				DrawRect(new Rect2(px, cellSize), color);
 			}
 		}
@@ -227,8 +230,16 @@ public partial class GridSimulator : Node2D
 
 	private void OnOpenBuildingSimulatorPressed()
 	{
-		// Building feature disabled for now; keep board building-free.
-		RemoveAllBuildingsFromBoard();
+		_buildingSimEnabled = !_buildingSimEnabled;
+		if (_buildingSimEnabled)
+		{
+			_buildingGrowthTimer.Start();
+		}
+		else
+		{
+			_buildingGrowthTimer.Stop();
+		}
+
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -243,7 +254,7 @@ public partial class GridSimulator : Node2D
 	private void OnGenerateTerrainPressed()
 	{
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
-		RemoveAllBuildingsFromBoard();
+		GenerateRandomBuildingsAfterTerrain(2);
 		QueueRedraw();
 	}
 
@@ -258,10 +269,6 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
-		// Removing building should clear both terrain-building tiles and constructed building cells.
-		if (terrainType == TerrainType.Building)
-			RemoveAllBuildingsFromBoard();
-
 		QueueRedraw();
 	}
 
@@ -271,6 +278,7 @@ public partial class GridSimulator : Node2D
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		GenerateRandomBuildingsAfterTerrain(2);
 		QueueRedraw();
 	}
 
@@ -290,16 +298,8 @@ public partial class GridSimulator : Node2D
 
 	private void OnBuildingGrowthTick()
 	{
-		if (!_buildingSimEnabled)
+		if (!_buildingSimEnabled || !_hasActiveBuildingProject)
 			return;
-
-		if (!_hasActiveBuildingProject && !TryStartNextBuildingProject())
-		{
-			_buildingSimEnabled = false;
-			_buildingGrowthTimer.Stop();
-			UpdateHud();
-			return;
-		}
 
 		var additions = Mathf.Min(BuildingGrowthPerTick, _activeBuildingQueue.Count);
 		for (var i = 0; i < additions; i++)
@@ -318,81 +318,6 @@ public partial class GridSimulator : Node2D
 		QueueRedraw();
 	}
 
-	private bool TryStartNextBuildingProject()
-	{
-		if (_buildingCells.Count == 0)
-		{
-			StartBuildingProject(GetInitialBuildingOrigin());
-			return true;
-		}
-
-		var dirs = new List<Vector2I> { Vector2I.Left, Vector2I.Right, Vector2I.Up, Vector2I.Down };
-		Shuffle(dirs);
-		var gap = 0;
-
-		foreach (var dir in dirs)
-		{
-			var candidate = _lastCompletedBuildingOrigin;
-			if (dir == Vector2I.Left)
-				candidate += new Vector2I(-_buildingWidthCells - gap, 0);
-			else if (dir == Vector2I.Right)
-				candidate += new Vector2I(_buildingWidthCells + gap, 0);
-			else if (dir == Vector2I.Up)
-				candidate += new Vector2I(0, -_buildingHeightCells - gap);
-			else if (dir == Vector2I.Down)
-				candidate += new Vector2I(0, _buildingHeightCells + gap);
-
-			if (!CanPlaceBuildingAt(candidate))
-				continue;
-
-			StartBuildingProject(candidate);
-			return true;
-		}
-
-		return false;
-	}
-
-	private Vector2I GetInitialBuildingOrigin()
-	{
-		return new Vector2I(
-			Mathf.Clamp(_firstNpc.Cell.X - _buildingWidthCells / 2, 0, GridWidth - _buildingWidthCells),
-			Mathf.Clamp(_firstNpc.Cell.Y - _buildingHeightCells / 2, 0, GridHeight - _buildingHeightCells)
-		);
-	}
-
-	private void StartBuildingProject(Vector2I origin)
-	{
-		_hasActiveBuildingProject = true;
-		_activeBuildingOrigin = origin;
-		_activeBuildingQueue.Clear();
-
-		for (var y = 0; y < _buildingHeightCells; y++)
-		{
-			for (var x = 0; x < _buildingWidthCells; x++)
-				_activeBuildingQueue.Enqueue(origin + new Vector2I(x, y));
-		}
-	}
-
-	private bool CanPlaceBuildingAt(Vector2I origin)
-	{
-		if (origin.X < 0 || origin.Y < 0)
-			return false;
-		if (origin.X + _buildingWidthCells > GridWidth || origin.Y + _buildingHeightCells > GridHeight)
-			return false;
-
-		for (var y = 0; y < _buildingHeightCells; y++)
-		{
-			for (var x = 0; x < _buildingWidthCells; x++)
-			{
-				var c = origin + new Vector2I(x, y);
-				if (_buildingCells.Contains(c))
-					return false;
-			}
-		}
-
-		return true;
-	}
-
 	private (int widthCells, int heightCells) GetFixedBuildingSizeCellsFromCharacter()
 	{
 		// Stable rule: building footprint is always 2x character footprint.
@@ -404,19 +329,68 @@ public partial class GridSimulator : Node2D
 		return (characterWidthCells * BuildingSizeMultiplier, characterHeightCells * BuildingSizeMultiplier);
 	}
 
-	private void Shuffle(List<Vector2I> values)
-	{
-		for (var i = values.Count - 1; i > 0; i--)
-		{
-			var j = _rng.RandiRange(0, i);
-			(values[i], values[j]) = (values[j], values[i]);
-		}
-	}
-
 	private static Color BuildingCellColor(int x, int y)
 	{
 		var checker = ((x + y) & 1) == 0;
 		return checker ? new Color(0.73f, 0.55f, 0.31f) : new Color(0.65f, 0.47f, 0.24f);
+	}
+
+	private void GenerateRandomBuildingsAfterTerrain(int count)
+	{
+		if (_buildingWidthCells <= 0 || _buildingHeightCells <= 0)
+			(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
+
+		_buildingCells.Clear();
+		_activeBuildingQueue.Clear();
+		_hasActiveBuildingProject = false;
+
+		var placed = 0;
+		var attempts = 0;
+		var maxAttempts = 500;
+		while (placed < count && attempts < maxAttempts)
+		{
+			attempts++;
+			var maxX = Mathf.Max(0, GridWidth - _buildingWidthCells);
+			var maxY = Mathf.Max(0, GridHeight - _buildingHeightCells);
+			var origin = new Vector2I(_rng.RandiRange(0, maxX), _rng.RandiRange(0, maxY));
+			if (!CanPlaceBuildingFootprint(origin))
+				continue;
+
+			AddBuildingFootprint(origin);
+			_lastCompletedBuildingOrigin = origin;
+			placed++;
+		}
+	}
+
+	private bool CanPlaceBuildingFootprint(Vector2I origin)
+	{
+		if (origin.X < 0 || origin.Y < 0)
+			return false;
+		if (origin.X + _buildingWidthCells > GridWidth || origin.Y + _buildingHeightCells > GridHeight)
+			return false;
+
+		for (var y = 0; y < _buildingHeightCells; y++)
+		{
+			for (var x = 0; x < _buildingWidthCells; x++)
+			{
+				var cell = origin + new Vector2I(x, y);
+				if (_buildingCells.Contains(cell))
+					return false;
+			}
+		}
+
+		return true;
+	}
+
+	private void AddBuildingFootprint(Vector2I origin)
+	{
+		for (var y = 0; y < _buildingHeightCells; y++)
+		{
+			for (var x = 0; x < _buildingWidthCells; x++)
+			{
+				_buildingCells.Add(origin + new Vector2I(x, y));
+			}
+		}
 	}
 
 	private void RemoveAllBuildingsFromBoard()
@@ -425,9 +399,7 @@ public partial class GridSimulator : Node2D
 		{
 			for (var x = 0; x < GridWidth; x++)
 			{
-				if (_terrain[x, y] == TerrainType.Building ||
-					_terrain[x, y] == TerrainType.Road ||
-					_terrain[x, y] == TerrainType.Mountain)
+				if (_terrain[x, y] == TerrainType.Mountain)
 					_terrain[x, y] = TerrainType.Grass;
 			}
 		}

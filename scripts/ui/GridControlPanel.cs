@@ -9,8 +9,6 @@ public partial class GridControlPanel : PanelContainer
 	private Button _forestButton = null!;
 	private Button _mountainButton = null!;
 	private Button _waterButton = null!;
-	private Button _roadButton = null!;
-	private Button _buildingButton = null!;
 	private Label _expandSizeValueLabel = null!;
 	private Label _terrainSmoothnessValueLabel = null!;
 
@@ -39,8 +37,6 @@ public partial class GridControlPanel : PanelContainer
 		_forestButton = GetNode<Button>("%ForestButton");
 		_mountainButton = GetNode<Button>("%MountainButton");
 		_waterButton = GetNode<Button>("%WaterButton");
-		_roadButton = GetNode<Button>("%RoadButton");
-		_buildingButton = GetNode<Button>("%BuildingButton");
 
 		randomizeButton.Pressed += () => RandomizeCharacterRequested?.Invoke();
 		buildingButton.Pressed += () => BuildingSimulatorRequested?.Invoke();
@@ -54,8 +50,6 @@ public partial class GridControlPanel : PanelContainer
 		_forestButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Forest);
 		_mountainButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Mountain);
 		_waterButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Water);
-		_roadButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Road);
-		_buildingButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Building);
 	}
 
 	public void SetCharacterVisibilityState(bool isVisible)

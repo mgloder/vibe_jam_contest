@@ -7,9 +7,7 @@ public enum TerrainType
 	Grass,
 	Forest,
 	Mountain,
-	Water,
-	Road,
-	Building
+	Water
 }
 
 public static class TerrainSystem
@@ -49,13 +47,6 @@ public static class TerrainSystem
 		var smoothPasses = 1 + Mathf.RoundToInt(smooth * 8f); // 1..9 passes
 		SmoothNaturalAdjacency(terrain, passes: smoothPasses);
 
-		// 4) Buildings (town patches): only on grass, never on water/mountain/forest.
-		var townCenters = PaintBuildingPatchesOnGrass(terrain, rng);
-		SoftenBuildingEdges(terrain);
-
-		// 5) Roads: only laid onto grass cells.
-		PaintRoadsOnGrass(terrain, townCenters);
-		SoftenRoadEdges(terrain);
 	}
 
 	public static Color TerrainToColor(TerrainType terrain, int x, int y)
@@ -68,8 +59,6 @@ public static class TerrainSystem
 			TerrainType.Forest => checker ? new Color(0.11f, 0.25f, 0.13f) : new Color(0.09f, 0.22f, 0.11f),
 			TerrainType.Mountain => checker ? new Color(0.38f, 0.40f, 0.42f) : new Color(0.33f, 0.35f, 0.37f),
 			TerrainType.Water => checker ? new Color(0.14f, 0.29f, 0.49f) : new Color(0.12f, 0.25f, 0.43f),
-			TerrainType.Road => checker ? new Color(0.42f, 0.37f, 0.30f) : new Color(0.37f, 0.32f, 0.26f),
-			TerrainType.Building => checker ? new Color(0.62f, 0.48f, 0.32f) : new Color(0.56f, 0.42f, 0.27f),
 			_ => new Color(0.2f, 0.2f, 0.2f)
 		};
 	}
@@ -155,85 +144,6 @@ public static class TerrainSystem
 		}
 	}
 
-	private static Godot.Collections.Array<Vector2I> PaintBuildingPatchesOnGrass(TerrainType[,] terrain, RandomNumberGenerator rng)
-	{
-		var width = terrain.GetLength(0);
-		var height = terrain.GetLength(1);
-		var centers = new Godot.Collections.Array<Vector2I>();
-
-		var targetTowns = 9;
-		for (var t = 0; t < targetTowns; t++)
-		{
-			var cx = Mathf.Clamp(Mathf.RoundToInt(NextGaussian(rng, width * 0.5f, width * 0.2f)), 0, width - 1);
-			var cy = Mathf.Clamp(Mathf.RoundToInt(NextGaussian(rng, height * 0.5f, height * 0.2f)), 0, height - 1);
-			if (terrain[cx, cy] != TerrainType.Grass)
-				continue;
-
-			centers.Add(new Vector2I(cx, cy));
-			var patchRadius = rng.RandfRange(width * 0.01f, width * 0.02f);
-			var radiusSq = patchRadius * patchRadius;
-			var minX = Mathf.Max(0, Mathf.FloorToInt(cx - patchRadius));
-			var maxX = Mathf.Min(width - 1, Mathf.CeilToInt(cx + patchRadius));
-			var minY = Mathf.Max(0, Mathf.FloorToInt(cy - patchRadius));
-			var maxY = Mathf.Min(height - 1, Mathf.CeilToInt(cy + patchRadius));
-
-			for (var y = minY; y <= maxY; y++)
-			{
-				for (var x = minX; x <= maxX; x++)
-				{
-					if (terrain[x, y] != TerrainType.Grass)
-						continue;
-
-					var dx = x - cx;
-					var dy = y - cy;
-					var d2 = dx * dx + dy * dy;
-					if (d2 > radiusSq)
-						continue;
-					if (rng.Randf() < 0.56f)
-						terrain[x, y] = TerrainType.Building;
-				}
-			}
-		}
-
-		return centers;
-	}
-
-	private static void PaintRoadsOnGrass(TerrainType[,] terrain, Godot.Collections.Array<Vector2I> centers)
-	{
-		if (centers.Count < 2)
-			return;
-
-		for (var i = 1; i < centers.Count; i++)
-		{
-			var from = centers[i - 1];
-			var to = centers[i];
-			PaintRoadPath(terrain, from, to);
-		}
-	}
-
-	private static void PaintRoadPath(TerrainType[,] terrain, Vector2I from, Vector2I to)
-	{
-		var x = from.X;
-		var y = from.Y;
-		var width = terrain.GetLength(0);
-		var height = terrain.GetLength(1);
-
-		var maxSteps = width + height;
-		for (var step = 0; step < maxSteps && (x != to.X || y != to.Y); step++)
-		{
-			if (x != to.X)
-				x += x < to.X ? 1 : -1;
-			else if (y != to.Y)
-				y += y < to.Y ? 1 : -1;
-
-			if (x < 0 || y < 0 || x >= width || y >= height)
-				break;
-
-			// Rule: roads only on grass.
-			if (terrain[x, y] == TerrainType.Grass)
-				terrain[x, y] = TerrainType.Road;
-		}
-	}
 
 	private static void SmoothNaturalAdjacency(TerrainType[,] terrain, int passes)
 	{
@@ -268,54 +178,6 @@ public static class TerrainSystem
 
 			CopyTerrain(buffer, terrain);
 		}
-	}
-
-	private static void SoftenBuildingEdges(TerrainType[,] terrain)
-	{
-		var width = terrain.GetLength(0);
-		var height = terrain.GetLength(1);
-		var buffer = new TerrainType[width, height];
-		CopyTerrain(terrain, buffer);
-
-		for (var y = 0; y < height; y++)
-		{
-			for (var x = 0; x < width; x++)
-			{
-				if (terrain[x, y] != TerrainType.Building)
-					continue;
-
-				var nearbyBuildings = CountNeighborsOfType(terrain, x, y, TerrainType.Building);
-				// Remove tiny specks to make building patches smoother.
-				if (nearbyBuildings <= 1)
-					buffer[x, y] = TerrainType.Grass;
-			}
-		}
-
-		CopyTerrain(buffer, terrain);
-	}
-
-	private static void SoftenRoadEdges(TerrainType[,] terrain)
-	{
-		var width = terrain.GetLength(0);
-		var height = terrain.GetLength(1);
-		var buffer = new TerrainType[width, height];
-		CopyTerrain(terrain, buffer);
-
-		for (var y = 0; y < height; y++)
-		{
-			for (var x = 0; x < width; x++)
-			{
-				if (terrain[x, y] != TerrainType.Road)
-					continue;
-
-				var nearbyRoads = CountNeighborsOfType(terrain, x, y, TerrainType.Road);
-				// Remove isolated road singletons for cleaner transitions.
-				if (nearbyRoads == 0)
-					buffer[x, y] = TerrainType.Grass;
-			}
-		}
-
-		CopyTerrain(buffer, terrain);
 	}
 
 	private static bool IsNatural(TerrainType t)
