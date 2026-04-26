@@ -16,6 +16,7 @@ public partial class GridSimulator : Node2D
 	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private ColonyCharacter _firstNpc = null!;
+	private Texture2D? _soldierTexture;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType _selectedTerrain = TerrainType.Grass;
@@ -39,6 +40,7 @@ public partial class GridSimulator : Node2D
 
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
+		_soldierTexture = GD.Load<Texture2D>("res://sprites/sample_s.png");
 		UpdateHud();
 	}
 
@@ -110,6 +112,12 @@ public partial class GridSimulator : Node2D
 	private void DrawFirstNpc(Vector2 gridOrigin)
 	{
 		var cellTopLeft = gridOrigin + new Vector2(_firstNpc.Cell.X * CellSize, _firstNpc.Cell.Y * CellSize);
+		if (_soldierTexture is not null)
+		{
+			DrawSoldierTexture(cellTopLeft, _soldierTexture);
+			return;
+		}
+
 		var pixelScale = Mathf.Max(2, CellSize * 2);
 
 		for (var y = 0; y < _firstNpc.SpriteRows.Length; y++)
@@ -130,6 +138,22 @@ public partial class GridSimulator : Node2D
 				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
 			}
 		}
+	}
+
+	private void DrawSoldierTexture(Vector2 cellTopLeft, Texture2D texture)
+	{
+		var textureSize = texture.GetSize();
+		if (textureSize.X <= 0f || textureSize.Y <= 0f)
+			return;
+
+		// Keep soldier readable at tiny grid cells while preserving sprite proportions.
+		var targetHeight = Mathf.Max(CellSize * 64f, 120f);
+		var scale = targetHeight / textureSize.Y;
+		var drawSize = textureSize * scale;
+
+		// Anchor roughly at character center so it stands on the selected tile area.
+		var drawPos = cellTopLeft - new Vector2(drawSize.X * 0.5f, drawSize.Y * 0.6f);
+		DrawTextureRect(texture, new Rect2(drawPos, drawSize), false);
 	}
 
 	private Vector2 GetGridOrigin()
