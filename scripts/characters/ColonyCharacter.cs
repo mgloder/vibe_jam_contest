@@ -21,6 +21,8 @@ public sealed class ColonyCharacter
 	public string DisplayName { get; set; }
 	public Vector2I Cell { get; set; }
 	public Vector2I Destination { get; set; }
+	/// <summary>Last horizontal move: +1 = stepped right (Expert PNG flipped), −1 = stepped left (unflipped). Default −1 so spawn is unflipped.</summary>
+	public int FacingXSign { get; set; } = -1;
 	public int Health { get; set; }
 	public bool IsAlive => Health > 0;
 	public int MaxHealth { get; }
@@ -129,29 +131,15 @@ public sealed class ColonyCharacter
 		return CreateByType(type, cell, $"{type} {rng.RandiRange(100, 999)}");
 	}
 
+	/// <summary>ASCII slot left empty; <see cref="GridSimulator"/> draws <c>res://scenes/images/civilan.png</c> for civilians.</summary>
 	private static (string[] spriteRows, Dictionary<char, Color> palette, string[] toolRows, Dictionary<char, Color> toolPalette, CharacterToolType tool, string defaultName) BuildCivilianVisual()
 	{
+		var rows = new string[9];
+		for (var i = 0; i < rows.Length; i++)
+			rows[i] = ".......";
 		return (
-			new[]
-			{
-				"..GGG..",
-				".GSSSG.",
-				".GSSSG.",
-				"..BBB..",
-				".BBTBB.",
-				".BBTBB.",
-				"..LLL..",
-				".L...L.",
-				"L.....L"
-			},
-			new Dictionary<char, Color>
-			{
-				['G'] = new Color(0.16f, 0.17f, 0.20f),
-				['S'] = new Color(0.95f, 0.81f, 0.68f),
-				['B'] = new Color(0.38f, 0.66f, 0.96f),
-				['T'] = new Color(0.10f, 0.14f, 0.22f),
-				['L'] = new Color(0.30f, 0.35f, 0.43f)
-			},
+			rows,
+			new Dictionary<char, Color>(),
 			Array.Empty<string>(),
 			new Dictionary<char, Color>(),
 			CharacterToolType.None,
@@ -159,47 +147,18 @@ public sealed class ColonyCharacter
 		);
 	}
 
+	/// <summary>ASCII slot left empty; <see cref="GridSimulator"/> draws <c>res://scenes/images/npc.png</c> for Experts.</summary>
 	private static (string[] spriteRows, Dictionary<char, Color> palette, string[] toolRows, Dictionary<char, Color> toolPalette, CharacterToolType tool, string defaultName) BuildExpertVisual()
 	{
+		var rows = new string[9];
+		for (var i = 0; i < rows.Length; i++)
+			rows[i] = ".......";
 		return (
-			new[]
-			{
-				"...G...",
-				"..SSS..",
-				".SSSSS.",
-				"..CCC..",
-				".CCTCC.",
-				".CCTCC.",
-				"..PPP..",
-				".P...P.",
-				"P.....P"
-			},
-			new Dictionary<char, Color>
-			{
-				['G'] = new Color(0.12f, 0.34f, 0.18f),
-				['S'] = new Color(0.92f, 0.72f, 0.58f),
-				['C'] = new Color(0.34f, 0.88f, 0.62f),
-				['T'] = new Color(0.08f, 0.12f, 0.24f),
-				['P'] = new Color(0.30f, 0.23f, 0.42f)
-			},
-			new[]
-			{
-				".......",
-				".......",
-				".......",
-				".....M.",
-				"....MMM",
-				".....M.",
-				"...HH..",
-				"...H...",
-				"...H..."
-			},
-			new Dictionary<char, Color>
-			{
-				['M'] = new Color(0.58f, 0.60f, 0.64f),
-				['H'] = new Color(0.48f, 0.30f, 0.16f)
-			},
-			CharacterToolType.Hammer,
+			rows,
+			new Dictionary<char, Color>(),
+			Array.Empty<string>(),
+			new Dictionary<char, Color>(),
+			CharacterToolType.None,
 			"Expert"
 		);
 	}

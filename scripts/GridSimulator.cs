@@ -200,6 +200,10 @@ public partial class GridSimulator : Node2D
 	private AudioStreamPlayer? _civilianMassScreamSfx;
 	private AudioStreamPlayer? _colonyStrikerGunshotSfx;
 	private AudioStreamPlayer? _servantSummonSfx;
+	private Texture2D? _expertNpcTexture;
+	private const string ExpertNpcTexturePath = "res://scenes/images/npc.png";
+	private Texture2D? _civilianTexture;
+	private const string CivilianTexturePath = "res://scenes/images/civilan.png";
 
 	public override void _Ready()
 	{
@@ -291,6 +295,9 @@ public partial class GridSimulator : Node2D
 			};
 			AddChild(_colonyStrikerGunshotSfx);
 		}
+
+		_expertNpcTexture = ResourceLoader.Load<Texture2D>(ExpertNpcTexturePath);
+		_civilianTexture = ResourceLoader.Load<Texture2D>(CivilianTexturePath);
 
 		var summon = ResourceLoader.Load<AudioStream>(ServantSummonSfxPath);
 		if (summon != null)
@@ -500,6 +507,16 @@ public partial class GridSimulator : Node2D
 		var s = _boardPixelsPerCell;
 		var ps = Mathf.Max(2f, s * 2f);
 		var cellTopLeft = _boardGridOrigin + new Vector2(c.Cell.X * s, c.Cell.Y * s);
+		if (c.Type == ColonyCharacterType.Expert && _expertNpcTexture != null && c.Health > 0)
+		{
+			CalcImageColonistTextureInCell(cellTopLeft, s, ps, _expertNpcTexture, out topLeftBoardPx, out sizePx);
+			return;
+		}
+		if (c.Type == ColonyCharacterType.Civilian && _civilianTexture != null && c.Health > 0)
+		{
+			CalcImageColonistTextureInCell(cellTopLeft, s, ps, _civilianTexture, out topLeftBoardPx, out sizePx);
+			return;
+		}
 		var minX = float.MaxValue;
 		var maxX = float.MinValue;
 		var minY = float.MaxValue;
@@ -553,6 +570,16 @@ public partial class GridSimulator : Node2D
 		}
 		topLeftBoardPx = cellTopLeft + new Vector2(minX, minY);
 		sizePx = new Vector2(maxX - minX, maxY - minY);
+	}
+
+	/// <summary>Same layout for Expert and Civilian PNGs: height ≈9 token rows, feet near the bottom of the sim cell, centered.</summary>
+	private static void CalcImageColonistTextureInCell(
+		Vector2 cellTopLeft, float cellSizePx, float pixelScale, Texture2D tex, out Vector2 topLeftBoardPx, out Vector2 sizePx)
+	{
+		var drawH = 9f * pixelScale;
+		var drawW = drawH * tex.GetWidth() / (float)tex.GetHeight();
+		topLeftBoardPx = cellTopLeft + new Vector2((cellSizePx - drawW) * 0.5f, cellSizePx - drawH);
+		sizePx = new Vector2(drawW, drawH);
 	}
 
 	/// <summary>Top edge of the terrain board in local pixels (for lightning origin).</summary>
@@ -947,6 +974,39 @@ public partial class GridSimulator : Node2D
 		if (character.Health <= 0)
 		{
 			DrawLayingDownCharacter(cellTopLeft, pixelScale);
+			return;
+		}
+
+		if (character.Type == ColonyCharacterType.Civilian)
+		{
+			if (_civilianTexture != null)
+			{
+				CalcImageColonistTextureInCell(cellTopLeft, s, pixelScale, _civilianTexture, out var tl, out var sz);
+				DrawTextureRect(_civilianTexture, new Rect2(tl, sz), false);
+			}
+			else
+				DrawRect(new Rect2(cellTopLeft, new Vector2(s, s)), new Color(0.45f, 0.7f, 0.95f, 0.88f));
+			return;
+		}
+
+		if (character.Type == ColonyCharacterType.Expert)
+		{
+			if (_expertNpcTexture != null)
+			{
+				CalcImageColonistTextureInCell(cellTopLeft, s, pixelScale, _expertNpcTexture, out var tl, out var sz);
+				// Art faces left when unflipped: moving left = as-is; moving right = mirror.
+				if (character.FacingXSign > 0)
+				{
+					var flip = new Transform2D(new Vector2(-1f, 0f), new Vector2(0f, 1f), new Vector2(tl.X + sz.X, tl.Y));
+					DrawSetTransformMatrix(flip);
+					DrawTextureRect(_expertNpcTexture, new Rect2(0, 0, sz), false);
+					DrawSetTransformMatrix(Transform2D.Identity);
+				}
+				else
+					DrawTextureRect(_expertNpcTexture, new Rect2(tl, sz), false);
+			}
+			else
+				DrawRect(new Rect2(cellTopLeft, new Vector2(s, s)), new Color(0.2f, 0.75f, 0.45f, 0.88f));
 			return;
 		}
 
@@ -2166,6 +2226,12 @@ public partial class GridSimulator : Node2D
 
 				_characterMoveBudget[i] -= cost;
 				pathQueue.Dequeue();
+				if (character.Type == ColonyCharacterType.Expert)
+				{
+					var dx = next.X - character.Cell.X;
+					if (dx != 0)
+						character.FacingXSign = dx > 0 ? 1 : -1;
+				}
 				character.Cell = next;
 				moved = true;
 			}
