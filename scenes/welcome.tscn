@@ -1,6 +1,6 @@
-[gd_scene load_steps=5 format=3 uid="uid://bj4qm8w3kx7np"]
+[gd_scene format=3 uid="uid://bj4qm8w3kx7np"]
 
-[ext_resource type="Script" path="res://scripts/WelcomeScreen.cs" id="1_welcome"]
+[ext_resource type="Script" uid="uid://c062jdhge3dy" path="res://scripts/WelcomeScreen.cs" id="1_welcome"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
 bg_color = Color(0.105882, 0.129412, 0.188235, 0.941176)
@@ -40,7 +40,7 @@ corner_radius_top_right = 18
 corner_radius_bottom_right = 18
 corner_radius_bottom_left = 18
 
-[node name="Welcome" type="Control"]
+[node name="Welcome" type="Control" unique_id=1109450587]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -48,9 +48,8 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_welcome")
-next_scene_path = "res://scenes/snake_game.tscn"
 
-[node name="Background" type="ColorRect" parent="."]
+[node name="Background" type="ColorRect" parent="." unique_id=1569545869]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -60,25 +59,7 @@ grow_vertical = 2
 mouse_filter = 2
 color = Color(0.1, 0.11, 0.16, 1)
 
-[node name="GlowTop" type="ColorRect" parent="."]
-layout_mode = 0
-offset_left = -56.0
-offset_top = -48.0
-offset_right = 904.0
-offset_bottom = 248.0
-mouse_filter = 2
-color = Color(0.227451, 0.341176, 0.6, 0.18)
-
-[node name="GlowBottom" type="ColorRect" parent="."]
-layout_mode = 0
-offset_left = 760.0
-offset_top = 426.0
-offset_right = 1368.0
-offset_bottom = 832.0
-mouse_filter = 2
-color = Color(0.156863, 0.533333, 0.262745, 0.2)
-
-[node name="Center" type="CenterContainer" parent="."]
+[node name="Center" type="CenterContainer" parent="." unique_id=825481804]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -86,111 +67,111 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="Card" type="PanelContainer" parent="Center"]
+[node name="Card" type="PanelContainer" parent="Center" unique_id=432185747]
 custom_minimum_size = Vector2(820, 520)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_card")
 
-[node name="Margin" type="MarginContainer" parent="Center/Card"]
+[node name="Margin" type="MarginContainer" parent="Center/Card" unique_id=755815698]
 layout_mode = 2
 theme_override_constants/margin_left = 36
 theme_override_constants/margin_top = 32
 theme_override_constants/margin_right = 36
 theme_override_constants/margin_bottom = 32
 
-[node name="VBox" type="VBoxContainer" parent="Center/Card/Margin"]
+[node name="VBox" type="VBoxContainer" parent="Center/Card/Margin" unique_id=404329985]
 layout_mode = 2
 theme_override_constants/separation = 24
 alignment = 1
 
-[node name="Eyebrow" type="Label" parent="Center/Card/Margin/VBox"]
+[node name="Eyebrow" type="Label" parent="Center/Card/Margin/VBox" unique_id=1183994405]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
 theme_override_colors/font_color = Color(0.584314, 0.705882, 0.960784, 0.901961)
+theme_override_font_sizes/font_size = 15
 text = "GODOT 4 C# PROTOTYPE"
 horizontal_alignment = 1
 
-[node name="Title" type="Label" parent="Center/Card/Margin/VBox"]
+[node name="Title" type="Label" parent="Center/Card/Margin/VBox" unique_id=49734381]
 layout_mode = 2
 theme_override_font_sizes/font_size = 64
 text = "Snake Garden"
 horizontal_alignment = 1
 
-[node name="Subtitle" type="Label" parent="Center/Card/Margin/VBox"]
+[node name="Subtitle" type="Label" parent="Center/Card/Margin/VBox" unique_id=872162110]
 layout_mode = 2
-theme_override_font_sizes/font_size = 20
 theme_override_colors/font_color = Color(0.784314, 0.815686, 0.886275, 1)
+theme_override_font_sizes/font_size = 20
 text = "Guide the snake across a clean arcade board, eat apples to grow, and stay away from your own tail."
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="FeatureRow" type="HBoxContainer" parent="Center/Card/Margin/VBox"]
+[node name="FeatureRow" type="HBoxContainer" parent="Center/Card/Margin/VBox" unique_id=1818934269]
 layout_mode = 2
 theme_override_constants/separation = 14
 alignment = 1
 
-[node name="ArrowCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+[node name="ArrowCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=653593108]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 
-[node name="ArrowLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/ArrowCard"]
+[node name="ArrowLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/ArrowCard" unique_id=796456828]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+theme_override_font_sizes/font_size = 15
 text = "Arrow keys"
 
-[node name="GrowthCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+[node name="GrowthCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=1805131311]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 
-[node name="GrowthLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/GrowthCard"]
+[node name="GrowthLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/GrowthCard" unique_id=693469728]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+theme_override_font_sizes/font_size = 15
 text = "Grow every apple"
 
-[node name="RulesCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow"]
+[node name="RulesCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=17270122]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 
-[node name="RulesLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/RulesCard"]
+[node name="RulesLabel" type="Label" parent="Center/Card/Margin/VBox/FeatureRow/RulesCard" unique_id=48411695]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
+theme_override_font_sizes/font_size = 15
 text = "No instant reverse"
 
-[node name="InfoPanel" type="PanelContainer" parent="Center/Card/Margin/VBox"]
+[node name="InfoPanel" type="PanelContainer" parent="Center/Card/Margin/VBox" unique_id=549085134]
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 
-[node name="InfoMargin" type="MarginContainer" parent="Center/Card/Margin/VBox/InfoPanel"]
+[node name="InfoMargin" type="MarginContainer" parent="Center/Card/Margin/VBox/InfoPanel" unique_id=572290766]
 layout_mode = 2
 theme_override_constants/margin_left = 18
 theme_override_constants/margin_top = 18
 theme_override_constants/margin_right = 18
 theme_override_constants/margin_bottom = 18
 
-[node name="InfoText" type="Label" parent="Center/Card/Margin/VBox/InfoPanel/InfoMargin"]
+[node name="InfoText" type="Label" parent="Center/Card/Margin/VBox/InfoPanel/InfoMargin" unique_id=1818434798]
 layout_mode = 2
-theme_override_font_sizes/font_size = 17
 theme_override_colors/font_color = Color(0.815686, 0.847059, 0.905882, 1)
+theme_override_font_sizes/font_size = 17
 text = "Click Start to jump into the game scene. Each apple increases your length by one. Hitting the wall or your own body ends the run."
 horizontal_alignment = 1
 autowrap_mode = 3
 
-[node name="StartButton" type="Button" parent="Center/Card/Margin/VBox"]
+[node name="StartButton" type="Button" parent="Center/Card/Margin/VBox" unique_id=888339194]
 unique_name_in_owner = true
-layout_mode = 2
 custom_minimum_size = Vector2(260, 64)
+layout_mode = 2
 theme_override_font_sizes/font_size = 26
 theme_override_styles/normal = SubResource("StyleBoxFlat_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_button")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button")
 text = "Start Game"
 
-[node name="Footer" type="Label" parent="Center/Card/Margin/VBox"]
+[node name="Footer" type="Label" parent="Center/Card/Margin/VBox" unique_id=828590968]
 layout_mode = 2
-theme_override_font_sizes/font_size = 15
 theme_override_colors/font_color = Color(0.588235, 0.635294, 0.713726, 1)
+theme_override_font_sizes/font_size = 15
 text = "Built as a polished 2D prototype in Godot with C#."
 horizontal_alignment = 1
