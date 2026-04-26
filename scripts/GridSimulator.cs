@@ -81,6 +81,8 @@ public partial class GridSimulator : Node2D
 	private readonly List<(int manh, ColonyAttackPoolKind kind, int index)> _colonyCombatPool = new();
 	private readonly List<Queue<Vector2I>> _characterPathQueues = new();
 	private readonly List<float> _characterMoveBudget = new();
+	/// <summary>Attack-capable colonists pause this long after a strike (no move, no attack).</summary>
+	private readonly List<float> _characterRestSecondsRemaining = new();
 	private readonly HashSet<Vector2I> _buildingCells = new();
 	private readonly List<Rect2I> _buildingFootprints = new();
 	private bool _buildingSimEnabled;
@@ -112,12 +114,22 @@ public partial class GridSimulator : Node2D
 	private const int MovementBudgetPerGridMajorStep = MinGridLineStepCells;
 	private const int DefaultTerrainMoveCost = 1;
 	private const int ForestTerrainMoveCost = 2; // 0.5x speed
-	/// <summary>Seconds the Servant pauses after a strike (no move, no attack).</summary>
-	private const float ServantPostAttackStopSec = 1f;
+	/// <summary>Seconds any attacker (Servant, enemy, colony striker) pauses after a hit.</summary>
+	private const float PostAttackStopSec = 1f;
 	/// <summary>Min gap (px) between the sim board’s bottom and the top of the ability dock, in the same space as <see cref="_boardGridOrigin"/> (includes room under the 2px board stroke).</summary>
 	private const float AbilityBarTopClearancePx = 20f;
 	/// <summary>Currency cost for the Servant card (key 1 / first slot). Spawns the Servant at a new random valid anchor via <see cref="PlaceServant"/>.</summary>
 	private const int ServantCardCurrencyCost = 6;
+	private const string GameOverScenePath = "res://scenes/game_over.tscn";
+	/// <summary>True after lose condition: queue <see cref="GameOverScenePath"/> (see <see cref="TryTriggerGameOver"/>).</summary>
+	private bool _gameOverSceneQueued;
+
+	/// <summary>Lowest token cost among ability cards; lose if below this with no living Servant.</summary>
+	public static int GetMinAbilityCardTokenCost() => ServantCardCurrencyCost;
+	/// <summary>Tokens (currency) granted when a colonist dies, by roster type.</summary>
+	private const int TokenRewardOnCivilianDeath = 1;
+	private const int TokenRewardOnExpertDeath = 6;
+	private const int TokenRewardOnSoldierDeath = 3;
 	private static readonly string[] LayingDownSpriteRows =
 	{
 		"....SSSSS....",
@@ -261,6 +273,9 @@ public partial class GridSimulator : Node2D
 		EnsureEnemyPathStateSize();
 		for (var ei = 0; ei < _enemies.Count; ei++)
 			_enemyRestSecondsRemaining[ei] = Mathf.Max(0f, _enemyRestSecondsRemaining[ei] - d);
+		EnsurePathStateSize();
+		for (var ci = 0; ci < _characterRestSecondsRemaining.Count; ci++)
+			_characterRestSecondsRemaining[ci] = Mathf.Max(0f, _characterRestSecondsRemaining[ci] - d);
 
 		// One layout pass per frame (was duplicated inside <see cref="UpdateHud"/> every call).
 		UpdateBoardLayout();
@@ -281,6 +296,7 @@ public partial class GridSimulator : Node2D
 				QueueRedraw();
 			}
 			_processHasRun = true;
+			TryTriggerGameOver();
 			return;
 		}
 
@@ -294,6 +310,29 @@ public partial class GridSimulator : Node2D
 		_processHasRun = true;
 		UpdateHud();
 		QueueRedraw();
+		TryTriggerGameOver();
+	}
+
+	/// <summary>Transition when tokens cannot afford the cheapest card and there is no living Servant.</summary>
+	private void TryTriggerGameOver()
+	{
+		if (_gameOverSceneQueued)
+			return;
+		if (_playerCurrency >= GetMinAbilityCardTokenCost())
+			return;
+		var hasServant = _servant != null && _servant.Health > 0;
+		if (hasServant)
+			return;
+		_gameOverSceneQueued = true;
+		SetProcess(false);
+		CallDeferred(nameof(DeferredChangeToGameOver));
+	}
+
+	private void DeferredChangeToGameOver()
+	{
+		var err = GetTree().ChangeSceneToFile(GameOverScenePath);
+		if (err != Error.Ok)
+			GD.PrintErr("Game over scene failed: ", err);
 	}
 
 	public override void _Draw()
@@ -1094,9 +1133,27 @@ public partial class GridSimulator : Node2D
 	private void OnCharacterDied(int index)
 	{
 		var c = _characters[index];
+		GrantTokensForColonistDeath(c.Type);
 		c.Destination = ClampToGridBounds(c.Cell);
 		_characterPathQueues[index].Clear();
 		_characterMoveBudget[index] = 0f;
+		if (index < _characterRestSecondsRemaining.Count)
+			_characterRestSecondsRemaining[index] = 0f;
+	}
+
+	/// <summary>Top-bar currency: each colonist death pays tokens (civilian 1, expert 6, soldier 3), clamped to <see cref="PlayerCurrencyMax"/>.</summary>
+	private void GrantTokensForColonistDeath(ColonyCharacterType type)
+	{
+		var n = type switch
+		{
+			ColonyCharacterType.Civilian => TokenRewardOnCivilianDeath,
+			ColonyCharacterType.Expert => TokenRewardOnExpertDeath,
+			ColonyCharacterType.Soldier => TokenRewardOnSoldierDeath,
+			_ => 0
+		};
+		if (n <= 0)
+			return;
+		PlayerCurrency = _playerCurrency + n;
 	}
 
 	private void OnEnemyDied(int index)
@@ -1334,12 +1391,14 @@ public partial class GridSimulator : Node2D
 		{
 			_characterPathQueues.Add(new Queue<Vector2I>());
 			_characterMoveBudget.Add(0f);
+			_characterRestSecondsRemaining.Add(0f);
 		}
 
 		while (_characterPathQueues.Count > _characters.Count)
 		{
 			_characterPathQueues.RemoveAt(_characterPathQueues.Count - 1);
 			_characterMoveBudget.RemoveAt(_characterMoveBudget.Count - 1);
+			_characterRestSecondsRemaining.RemoveAt(_characterRestSecondsRemaining.Count - 1);
 		}
 	}
 
@@ -1449,6 +1508,8 @@ public partial class GridSimulator : Node2D
 			var character = _characters[i];
 			var pathQueue = _characterPathQueues[i];
 			if (character.Health <= 0)
+				continue;
+			if (_characterRestSecondsRemaining[i] > 0f)
 				continue;
 
 			if (character.Cell == character.Destination)
@@ -1635,17 +1696,20 @@ public partial class GridSimulator : Node2D
 				hits++;
 			}
 			if (hits > 0)
-				_enemyRestSecondsRemaining[ei] = ServantPostAttackStopSec;
+				_enemyRestSecondsRemaining[ei] = PostAttackStopSec;
 		}
 	}
 
 	/// <summary>Colony strikers hit <see cref="EnemyCharacter"/> and (if in range) the <see cref="Servant"/>; they do not damage other colonists.</summary>
 	private void StepColonyCharacterCombat()
 	{
+		EnsurePathStateSize();
 		for (var ai = 0; ai < _characters.Count; ai++)
 		{
 			var a = _characters[ai];
 			if (!a.IsAlive || !a.CanAttack)
+				continue;
+			if (_characterRestSecondsRemaining[ai] > 0f)
 				continue;
 			var r = a.AttackRangeChebyshev;
 			if (r <= 0)
@@ -1690,6 +1754,8 @@ public partial class GridSimulator : Node2D
 					}
 				}
 			}
+			if (hits > 0)
+				_characterRestSecondsRemaining[ai] = PostAttackStopSec;
 		}
 	}
 
@@ -1725,7 +1791,7 @@ public partial class GridSimulator : Node2D
 				target.Health = Mathf.Max(0, h - Servant.AttackDamage);
 				if (h > 0 && !target.IsAlive)
 					OnCharacterDied(targetIndex);
-				_servantRestSecondsRemaining = ServantPostAttackStopSec;
+				_servantRestSecondsRemaining = PostAttackStopSec;
 			}
 			return;
 		}
