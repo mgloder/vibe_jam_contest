@@ -13,13 +13,14 @@ public partial class GridSimulator : Node2D
 
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
-	private Vector2I _firstNpcCell;
+	private ColonyCharacter _firstNpc = null!;
 
 	public override void _Ready()
 	{
 		_statusLabel = GetNode<Label>("%StatusLabel");
 		_statsLabel = GetNode<Label>("%StatsLabel");
-		_firstNpcCell = new Vector2I(GridWidth / 2, GridHeight / 2);
+		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
+		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
 		UpdateHud();
 	}
 
@@ -81,42 +82,24 @@ public partial class GridSimulator : Node2D
 
 	private void DrawFirstNpc(Vector2 gridOrigin)
 	{
-		var cellTopLeft = gridOrigin + new Vector2(_firstNpcCell.X * CellSize, _firstNpcCell.Y * CellSize);
+		var cellTopLeft = gridOrigin + new Vector2(_firstNpc.Cell.X * CellSize, _firstNpc.Cell.Y * CellSize);
 		var pixelScale = Mathf.Max(2, CellSize * 2);
 
-		// 7x9 tiny pawn sprite (RimWorld-like top-down placeholder).
-		var sprite = new[]
+		for (var y = 0; y < _firstNpc.SpriteRows.Length; y++)
 		{
-			"..GGG..",
-			".GSSSG.",
-			".GSSSG.",
-			"..BBB..",
-			".BBTBB.",
-			".BBTBB.",
-			"..LLL..",
-			".L...L.",
-			"L.....L"
-		};
-
-		for (var y = 0; y < sprite.Length; y++)
-		{
-			for (var x = 0; x < sprite[y].Length; x++)
+			var row = _firstNpc.SpriteRows[y];
+			for (var x = 0; x < row.Length; x++)
 			{
-				var token = sprite[y][x];
+				var token = row[x];
 				if (token == '.')
 					continue;
+				if (!_firstNpc.Palette.TryGetValue(token, out var color))
+					continue;
 
-				var color = token switch
-				{
-					'G' => new Color(0.16f, 0.17f, 0.20f), // hair/outline
-					'S' => new Color(0.95f, 0.81f, 0.68f), // skin
-					'B' => new Color(0.38f, 0.66f, 0.96f), // shirt
-					'T' => new Color(0.10f, 0.14f, 0.22f), // belt/shadow
-					'L' => new Color(0.30f, 0.35f, 0.43f), // legs
-					_ => Colors.White
-				};
-
-				var px = cellTopLeft + new Vector2(x * pixelScale - 3 * pixelScale, y * pixelScale - 4 * pixelScale);
+				var px = cellTopLeft + new Vector2(
+					(x - _firstNpc.SpritePivot.X) * pixelScale,
+					(y - _firstNpc.SpritePivot.Y) * pixelScale
+				);
 				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
 			}
 		}
@@ -135,6 +118,6 @@ public partial class GridSimulator : Node2D
 	private void UpdateHud()
 	{
 		_statusLabel.Text = "RimWorld-style scaffold with first NPC";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: ({_firstNpcCell.X}, {_firstNpcCell.Y})  |  Press R to redraw";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  Press R to redraw";
 	}
 }
