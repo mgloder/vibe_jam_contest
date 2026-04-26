@@ -1,3 +1,4 @@
+using System;
 using Godot;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,6 +29,9 @@ public partial class GridSimulator : Node2D
 	private GridControlPanel _controlPanel = null!;
 	private readonly List<ColonyCharacter> _characters = new();
 	private Servant? _servant;
+	private Vector2I? _servantPursueCell;
+	private readonly Queue<Vector2I> _servantPathQueue = new();
+	private float _servantMoveBudget;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
@@ -56,6 +60,25 @@ public partial class GridSimulator : Node2D
 	private const int MovementBudgetPerGridMajorStep = MinGridLineStepCells;
 	private const int DefaultTerrainMoveCost = 1;
 	private const int ForestTerrainMoveCost = 2; // 0.5x speed
+	/// <summary>Manhattan reach for Servant attacks, aligned to one major grid line step.</summary>
+	private const int ServantAttackRangeCells = MinGridLineStepCells;
+	/// <summary>Seconds the Servant pauses after a strike (no move, no attack).</summary>
+	private const float ServantPostAttackStopSec = 1f;
+	private static readonly string[] LayingDownSpriteRows =
+	{
+		"....SSSSS....",
+		"..LDDDDDDLLL.",
+		"....L...L...."
+	};
+	private static readonly Vector2I LayingDownSpritePivot = new(5, 1);
+	private static readonly Dictionary<char, Color> LayingDownPalette = new()
+	{
+		['S'] = new Color(0.14f, 0.10f, 0.10f), // ground shadow
+		['D'] = new Color(0.32f, 0.32f, 0.40f), // body
+		['L'] = new Color(0.22f, 0.24f, 0.30f)  // limbs
+	};
+
+	private float _servantRestSecondsRemaining;
 
 	public override void _Ready()
 	{
@@ -113,9 +136,16 @@ public partial class GridSimulator : Node2D
 
 	public override void _Process(double delta)
 	{
-		_characterMoveAccumulatorSec += (float)delta;
+		var d = (float)delta;
+		_servantRestSecondsRemaining = Mathf.Max(0f, _servantRestSecondsRemaining - d);
+
+		_characterMoveAccumulatorSec += d;
 		if (_characterMoveAccumulatorSec < CharacterMoveStepSec)
+		{
+			UpdateHud();
+			QueueRedraw();
 			return;
+		}
 
 		while (_characterMoveAccumulatorSec >= CharacterMoveStepSec)
 		{
@@ -168,7 +198,8 @@ public partial class GridSimulator : Node2D
 		{
 			for (var i = 0; i < _characters.Count; i++)
 			{
-				DrawCharacterDestination(_characters[i], origin);
+				if (_characters[i].Health > 0)
+					DrawCharacterDestination(_characters[i], origin);
 				DrawCharacter(_characters[i], origin);
 			}
 			if (_servant != null)
@@ -194,6 +225,12 @@ public partial class GridSimulator : Node2D
 		var cellTopLeft = gridOrigin + new Vector2(character.Cell.X * CellSize, character.Cell.Y * CellSize);
 		var pixelScale = Mathf.Max(2, CellSize * 2);
 
+		if (character.Health <= 0)
+		{
+			DrawLayingDownCharacter(cellTopLeft, pixelScale);
+			return;
+		}
+
 		for (var y = 0; y < character.SpriteRows.Length; y++)
 		{
 			var row = character.SpriteRows[y];
@@ -214,6 +251,29 @@ public partial class GridSimulator : Node2D
 		}
 
 		DrawNpcTool(character, cellTopLeft, pixelScale);
+	}
+
+	/// <summary>Prone silhouette when <see cref="ColonyCharacter.Health"/> is 0 (body remains on the map).</summary>
+	private void DrawLayingDownCharacter(Vector2 cellTopLeft, float pixelScale)
+	{
+		for (var y = 0; y < LayingDownSpriteRows.Length; y++)
+		{
+			var row = LayingDownSpriteRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				var token = row[x];
+				if (token == '.')
+					continue;
+				if (!LayingDownPalette.TryGetValue(token, out var color))
+					continue;
+				color = new Color(color.R, color.G, color.B, color.A * 0.9f);
+				var px = cellTopLeft + new Vector2(
+					(x - LayingDownSpritePivot.X) * pixelScale,
+					(y - LayingDownSpritePivot.Y) * pixelScale + pixelScale
+				);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
 	}
 
 	/// <summary>Same token/sprite path as <see cref="DrawCharacter"/>, with per-token size scaled by <see cref="Servant.PixelScaleMultiplierVsCharacter"/>.</summary>
@@ -610,6 +670,8 @@ public partial class GridSimulator : Node2D
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var character = _characters[i];
+			if (character.Health <= 0)
+				continue;
 			if (IsWalkableCharacterCell(character.Cell))
 				continue;
 
@@ -617,7 +679,7 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Spawn/refresh the Cthulhu token sprite east of map center, snapped to a walkable cell (after buildings exist).</summary>
+	/// <summary>Spawn/refresh the Cthulhu token sprite east of map center; anchor is BFSed so the full token board avoids water and buildings (see <see cref="IsWalkableForServantAnchorCell(Servant, Vector2I)"/>).</summary>
 	private void PlaceServant()
 	{
 		var center = new Vector2I(GridWidth / 2, GridHeight / 2);
@@ -625,15 +687,32 @@ public partial class GridSimulator : Node2D
 			Mathf.Clamp(center.X + 64, 0, GridWidth - 1),
 			Mathf.Clamp(center.Y + 32, 0, GridHeight - 1)
 		);
-		_servant = Servant.CreateAt(FindNearestWalkableCell(preferred));
+		var start = FindNearestWalkableCell(preferred);
+		var proto = Servant.CreateAt(start);
+		var cell = FindNearestCellSatisfying(start, a => IsWalkableForServantAnchorCell(proto, a));
+		proto.Cell = cell;
+		_servant = proto;
+		_servantPursueCell = null;
+		_servantPathQueue.Clear();
+		_servantMoveBudget = 0f;
+		_servantRestSecondsRemaining = 0f;
 	}
 
 	private void EnsureServantOnWalkable()
 	{
 		if (_servant == null)
 			return;
-		if (!IsWalkableCharacterCell(_servant.Cell))
-			_servant.Cell = FindNearestWalkableCell(_servant.Cell);
+		if (IsWalkableForServantAnchorCell(_servant, _servant.Cell))
+			return;
+		_servant.Cell = FindNearestCellSatisfying(_servant.Cell, a => IsWalkableForServantAnchorCell(_servant, a));
+	}
+
+	private void OnCharacterDied(int index)
+	{
+		var c = _characters[index];
+		c.Destination = c.Cell;
+		_characterPathQueues[index].Clear();
+		_characterMoveBudget[index] = 0f;
 	}
 
 	private void EnsureCharacterDestinationsAreValid()
@@ -641,6 +720,11 @@ public partial class GridSimulator : Node2D
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var character = _characters[i];
+			if (character.Health <= 0)
+			{
+				character.Destination = character.Cell;
+				continue;
+			}
 			var destination = character.Destination;
 			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight ||
 				!IsValidDestinationCell(destination))
@@ -655,13 +739,16 @@ public partial class GridSimulator : Node2D
 	private bool IsValidDestinationCell(Vector2I cell) =>
 		IsWalkableCharacterCell(cell);
 
-	private Vector2I FindNearestWalkableCell(Vector2I start)
+	/// <summary>
+	/// 4-way BFS from a clamped start; first cell matching <paramref name="isValidAnchor"/> (default single-cell <see cref="IsWalkableCharacterCell"/> = land, no building).
+	/// </summary>
+	private Vector2I FindNearestCellSatisfying(Vector2I start, Func<Vector2I, bool> isValidAnchor)
 	{
 		var clampedStart = new Vector2I(
 			Mathf.Clamp(start.X, 0, GridWidth - 1),
 			Mathf.Clamp(start.Y, 0, GridHeight - 1)
 		);
-		if (IsWalkableCharacterCell(clampedStart))
+		if (isValidAnchor(clampedStart))
 			return clampedStart;
 
 		var visited = new bool[GridWidth, GridHeight];
@@ -682,7 +769,7 @@ public partial class GridSimulator : Node2D
 					continue;
 
 				visited[next.X, next.Y] = true;
-				if (IsWalkableCharacterCell(next))
+				if (isValidAnchor(next))
 					return next;
 				queue.Enqueue(next);
 			}
@@ -690,6 +777,9 @@ public partial class GridSimulator : Node2D
 
 		return clampedStart;
 	}
+
+	private Vector2I FindNearestWalkableCell(Vector2I start) =>
+		FindNearestCellSatisfying(start, IsWalkableCharacterCell);
 
 	private Vector2I FindRandomValidDestinationCell(Vector2I? avoidCell = null)
 	{
@@ -774,6 +864,8 @@ public partial class GridSimulator : Node2D
 		{
 			var character = _characters[i];
 			var pathQueue = _characterPathQueues[i];
+			if (character.Health <= 0)
+				continue;
 
 			if (character.Cell == character.Destination)
 			{
@@ -842,6 +934,146 @@ public partial class GridSimulator : Node2D
 					pathQueue.Clear();
 			}
 		}
+
+		StepServant();
+	}
+
+	/// <summary>Chase the closest (by board-to-board border gap) <see cref="ColonyCharacter"/>; in range when L1 gap from Servant board to NPC board ≤ one major step (overlapping boards = gap 0).</summary>
+	private void StepServant()
+	{
+		if (_servant is not { } servant)
+			return;
+		if (_servantRestSecondsRemaining > 0f)
+			return;
+
+		if (!TryGetServantChaseTarget(out var target, out var targetIndex))
+		{
+			_servantPathQueue.Clear();
+			return;
+		}
+
+		var gap = ManhattanBorderGapBetweenRects(GetServantBoardRect(servant), GetColonyCharacterBoardRect(target));
+		if (gap <= ServantAttackRangeCells)
+		{
+			_servantPathQueue.Clear();
+			if (target.IsAlive)
+			{
+				var h = target.Health;
+				target.Health = Mathf.Max(0, h - Servant.AttackDamage);
+				if (h > 0 && !target.IsAlive)
+					OnCharacterDied(targetIndex);
+				_servantRestSecondsRemaining = ServantPostAttackStopSec;
+			}
+			return;
+		}
+
+		if (_servantPathQueue.Count == 0 || _servantPursueCell != target.Cell)
+		{
+			_servantPursueCell = target.Cell;
+			ReplanServantPath(target.Cell);
+		}
+
+		if (_servantPathQueue.Count == 0)
+			return;
+
+		_servantMoveBudget += MovementBudgetPerGridMajorStep;
+		var moved = false;
+		while (_servantMoveBudget > 0f)
+		{
+			if (_servantPathQueue.Count == 0)
+			{
+				if (!ReplanServantPath(target.Cell))
+					break;
+				if (_servantPathQueue.Count == 0)
+					break;
+			}
+
+			var next = _servantPathQueue.Peek();
+			var d = Mathf.Abs(next.X - servant.Cell.X) + Mathf.Abs(next.Y - servant.Cell.Y);
+			if (d != 1)
+			{
+				ReplanServantPath(target.Cell);
+				if (_servantPathQueue.Count == 0)
+					break;
+				continue;
+			}
+
+			if (!IsWalkableForServantAnchorCell(next))
+			{
+				ReplanServantPath(target.Cell);
+				if (_servantPathQueue.Count == 0)
+					break;
+				continue;
+			}
+
+			var cost = (float)GetPathMoveCost(next);
+			if (_servantMoveBudget < cost)
+				break;
+
+			_servantMoveBudget -= cost;
+			_servantPathQueue.Dequeue();
+			servant.Cell = next;
+			moved = true;
+		}
+
+		if (moved && servant.Cell == target.Cell)
+			_servantPathQueue.Clear();
+	}
+
+	private bool ReplanServantPath(Vector2I destination)
+	{
+		if (_servant == null)
+			return false;
+		_servantPathQueue.Clear();
+		_servantMoveBudget = 0f;
+
+		if (_servant.Cell == destination)
+			return true;
+
+		var fullPath = GridAStar.FindPath(
+			GridWidth,
+			GridHeight,
+			_servant.Cell,
+			destination,
+			c => IsWalkableForServantAnchorCell(c),
+			GetPathMoveCost
+		);
+		if (fullPath == null)
+			return false;
+
+		for (var s = 1; s < fullPath.Count; s++)
+			_servantPathQueue.Enqueue(fullPath[s]);
+
+		return true;
+	}
+
+	/// <summary>Nearest living NPC by L1 border gap between token boards (grid space); ties favor lower list index.</summary>
+	private bool TryGetServantChaseTarget(out ColonyCharacter? target, out int index)
+	{
+		target = null;
+		index = -1;
+		if (_servant is not { } s)
+			return false;
+		var servantR = GetServantBoardRect(s);
+		ColonyCharacter? best = null;
+		var bestD = float.MaxValue;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (!c.IsAlive)
+				continue;
+			var d = ManhattanBorderGapBetweenRects(servantR, GetColonyCharacterBoardRect(c));
+			if (d < bestD)
+			{
+				bestD = d;
+				best = c;
+				index = i;
+			}
+		}
+		if (best == null)
+			return false;
+		target = best;
+		return true;
 	}
 
 	private Vector2I FindNewDestinationAfterArrival(ColonyCharacter c) =>
@@ -852,6 +1084,88 @@ public partial class GridSimulator : Node2D
 	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
 		Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y);
 
+	/// <summary>Axis-aligned token board in float grid coordinates; same placement as <see cref="DrawCharacter"/> / <see cref="DrawServant"/> (half-open via <see cref="Rect2.End"/>).</summary>
+	private Rect2 GetColonyCharacterBoardRect(ColonyCharacter c)
+	{
+		var w = c.SpriteRows.Length == 0 ? 1 : c.SpriteRows[0].Length;
+		var h = Mathf.Max(1, c.SpriteRows.Length);
+		var pixelScale = Mathf.Max(2, CellSize * 2);
+		return GetTokenBoardRectInGridCells(c.Cell, w, h, c.SpritePivot, pixelScale, CellSize);
+	}
+
+	/// <summary>Token board AABB for the Servant (includes <see cref="Servant.PixelScaleMultiplierVsCharacter"/>).</summary>
+	/// <param name="anchorCell">Cell grid position for the Servant (same as <see cref="Servant.Cell"/> for current pose).</param>
+	private Rect2 GetServantBoardRectForAnchor(Servant s, Vector2I anchorCell)
+	{
+		var w = s.SpriteRows.Length == 0 ? 1 : s.SpriteRows[0].Length;
+		var h = Mathf.Max(1, s.SpriteRows.Length);
+		var basePixel = Mathf.Max(2, CellSize * 2);
+		var pixelScale = basePixel * Servant.PixelScaleMultiplierVsCharacter;
+		return GetTokenBoardRectInGridCells(anchorCell, w, h, s.SpritePivot, pixelScale, CellSize);
+	}
+
+	private Rect2 GetServantBoardRect(Servant s) => GetServantBoardRectForAnchor(s, s.Cell);
+
+	/// <summary>True if the Servant token AABB in grid space only covers walkable (non-water, non-building) cells — used by the same 4-way A* as other units.</summary>
+	private bool IsWalkableForServantAnchorCell(Servant s, Vector2I anchorCell)
+	{
+		var r = GetServantBoardRectForAnchor(s, anchorCell);
+		var ex = r.Position.X + r.Size.X;
+		var ey = r.Position.Y + r.Size.Y;
+		var y0 = (int)System.Math.Floor(r.Position.Y);
+		var y1 = (int)System.Math.Ceiling(ey);
+		var x0 = (int)System.Math.Floor(r.Position.X);
+		var x1 = (int)System.Math.Ceiling(ex);
+		for (var y = y0; y < y1; y++)
+		{
+			for (var x = x0; x < x1; x++)
+			{
+				if (x < 0 || y < 0 || x >= GridWidth || y >= GridHeight)
+					return false;
+				if (!IsWalkableCharacterCell(new Vector2I(x, y)))
+					return false;
+			}
+		}
+		return true;
+	}
+
+	/// <summary>Current Servant; same rules as A* and step (no water under any part of the board).</summary>
+	private bool IsWalkableForServantAnchorCell(Vector2I anchorCell) =>
+		_servant != null && IsWalkableForServantAnchorCell(_servant, anchorCell);
+
+	private static Rect2 GetTokenBoardRectInGridCells(
+		Vector2I cell, int spriteW, int spriteH, Vector2I pivot, float pixelScale, int cellSize)
+	{
+		var cs = Mathf.Max(1, cellSize);
+		var leftX = (0f - pivot.X) * pixelScale;
+		var rightX = (spriteW - pivot.X) * pixelScale;
+		var topY = (0f - pivot.Y) * pixelScale;
+		var bottomY = (spriteH - pivot.Y) * pixelScale;
+		var xMin = (cell.X * cs + leftX) / cs;
+		var yMin = (cell.Y * cs + topY) / cs;
+		var xMax = (cell.X * cs + rightX) / cs;
+		var yMax = (cell.Y * cs + bottomY) / cs;
+		return new Rect2(xMin, yMin, xMax - xMin, yMax - yMin);
+	}
+
+	/// <summary>L1 distance between the two axis-aligned boards: sum of 1D gaps (0 when rectangles overlap in 2D — including NPC fully inside Servant area).</summary>
+	private static float ManhattanBorderGapBetweenRects(Rect2 a, Rect2 b)
+	{
+		var gx = AxisGapHalfOpen(a.Position.X, a.End.X, b.Position.X, b.End.X);
+		var gy = AxisGapHalfOpen(a.Position.Y, a.End.Y, b.Position.Y, b.End.Y);
+		return gx + gy;
+	}
+
+	/// <summary>Distance between two half-open intervals on the line; 0 if they overlap or touch.</summary>
+	private static float AxisGapHalfOpen(float a0, float a1, float b0, float b1)
+	{
+		if (a1 <= b0)
+			return b0 - a1;
+		if (b1 <= a0)
+			return a0 - b1;
+		return 0f;
+	}
+
 	/// <summary>Attack-capable units (Expert, Soldier) are treated as threats for flee targeting.</summary>
 	private List<Vector2I> GetEnemyCellsForCivilian(ColonyCharacter self)
 	{
@@ -861,9 +1175,11 @@ public partial class GridSimulator : Node2D
 			var o = _characters[i];
 			if (o.Id == self.Id)
 				continue;
-			if (o.CanAttack)
+			if (o.CanAttack && o.Health > 0)
 				list.Add(o.Cell);
 		}
+		if (_servant != null)
+			list.Add(_servant.Cell);
 		return list;
 	}
 

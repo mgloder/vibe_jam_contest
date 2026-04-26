@@ -4,6 +4,9 @@ using System.Collections.Generic;
 /// <summary>
 /// Monster: Servant, drawn as a Cthulhu-style silhouette.
 /// Renders at <see cref="PixelScaleMultiplierVsCharacter"/> times the same base pixel size used for <see cref="ColonyCharacter"/> art.
+/// Pathfinding in <see cref="GridSimulator"/> uses the same 4-way <c>GridAStar</c> as other units, with
+/// a walkable test so the full token board never covers water (or buildings). Combat only chases
+/// and damages <see cref="ColonyCharacter.IsAlive"/> characters.
 /// </summary>
 public sealed class Servant
 {
@@ -11,6 +14,9 @@ public sealed class Servant
 
 	/// <summary>Draw with <c>colonyCharacterPixelScale * this</c> (1× matches NPC token size).</summary>
 	public const int PixelScaleMultiplierVsCharacter = 1;
+
+	/// <summary>Damage per hit when in melee range to a <see cref="ColonyCharacter"/>.</summary>
+	public const int AttackDamage = 1;
 
 	public string DisplayName { get; }
 	public Vector2I Cell { get; set; }

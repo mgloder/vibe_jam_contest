@@ -26,6 +26,8 @@ public sealed class ColonyCharacter
 	public Vector2I Destination { get; set; }
 	/// <summary>Current hit points. Civilian: 1; Soldier: 2; Expert: 4.</summary>
 	public int Health { get; set; }
+	/// <summary>True if this unit can act as a valid combat/collision target (corpses are <see cref="IsAlive"/> false).</summary>
+	public bool IsAlive => Health > 0;
 	public int MaxHealth { get; }
 	/// <summary>Attack power. Civilian: 0; Soldier: 1; Expert: 3.</summary>
 	public int Attack { get; }
