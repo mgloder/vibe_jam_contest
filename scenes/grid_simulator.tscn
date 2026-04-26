@@ -387,23 +387,110 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 0)
 layout_mode = 0
 size_flags_vertical = 1
-theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card_empty")
+theme_override_styles/panel = SubResource("StyleBoxFlat_ability_card")
 
-[node name="EmptyLabel2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2"]
+[node name="CardAccent2" type="ColorRect" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2"]
+layout_mode = 1
+mouse_filter = 2
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 3.0
+color = Color(0.72, 0.3, 0.52, 0.9)
+
+[node name="Card2Inner" type="MarginContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2"]
 layout_mode = 1
 mouse_filter = 2
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 4.0
-offset_top = 4.0
-offset_right = -4.0
-offset_bottom = -4.0
-theme_override_font_sizes/font_size = 10
-theme_override_colors/font_color = Color(0.4, 0.44, 0.52, 0.7)
-text = "Empty"
+offset_left = 0.0
+offset_top = 3.0
+offset_right = 0.0
+offset_bottom = 0.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 6
+
+[node name="Card2VBox" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 5
+
+[node name="TitleRow2" type="HBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 4
+
+[node name="AbilityName2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/TitleRow2"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_font_sizes/font_size = 11
+theme_override_colors/font_color = Color(0.9, 0.93, 0.98, 1)
+text = "Soul Whisper"
+autowrap_mode = 0
+vertical_alignment = 1
+
+[node name="KeyBadge2" type="PanelContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/TitleRow2"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_key_badge")
+
+[node name="AbilityKey2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/TitleRow2/KeyBadge2"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 9
+theme_override_colors/font_color = Color(0.7, 0.78, 0.92, 1)
+text = "2"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="CostPill2" type="PanelContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox"]
+layout_mode = 2
+size_flags_vertical = 0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_cost_pill")
+
+[node name="CostVBox2" type="VBoxContainer" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/CostPill2"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+alignment = 1
+
+[node name="CostValue2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/CostPill2/CostVBox2"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 18
+theme_override_colors/font_color = Color(0.5, 0.95, 0.8, 1)
+text = "3"
+horizontal_alignment = 1
+
+[node name="CostLabel2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox/CostPill2/CostVBox2"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_font_sizes/font_size = 7
+theme_override_colors/font_color = Color(0.6, 0.72, 0.65, 0.95)
+text = "TOKENS"
+horizontal_alignment = 1
+
+[node name="CardDivider2" type="ColorRect" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox"]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+size_flags_vertical = 0
+mouse_filter = 2
+color = Color(0.35, 0.45, 0.58, 0.4)
+
+[node name="AbilityDesc2" type="Label" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2/AbilityCard2/Card2Inner/Card2VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_font_sizes/font_size = 7
+theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
+text = "Arming spawns a random Crazy. Then left-click the map: civilians in range turn to crazies (3 tokens, if any are there). Press 2 or this card, Esc or right-click to cancel."
+autowrap_mode = 2
 
 [node name="AbilityCardHolder3" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
 clip_contents = false

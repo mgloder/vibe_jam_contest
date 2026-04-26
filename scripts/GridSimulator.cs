@@ -47,6 +47,10 @@ public partial class GridSimulator : Node2D
 	private Control? _abilityBarPanel;
 	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> spawns a Servant on left click (each use adds one).</summary>
 	private Control? _abilityCardSlot1Holder;
+	/// <summary>Second card: arm Soul Whisper; then left-click the map to convert civilians in range (or Esc / RMB to cancel).</summary>
+	private Control? _abilityCardSlot2Holder;
+	/// <summary>True after key 2 or left-click the second card, until a map click completes or cancels the ability.</summary>
+	private bool _soulWhisperTargeting;
 	private ProgressBar? _currencyBar;
 	private Label? _currencyValueLabel;
 	private GridControlPanel? _controlPanel;
@@ -127,6 +131,10 @@ public partial class GridSimulator : Node2D
 	private const float AbilityBarTopClearancePx = 20f;
 	/// <summary>Currency cost for the Servant card (key 1 / first slot). Each use adds a new Servant; existing ones are kept.</summary>
 	private const int ServantCardCurrencyCost = 6;
+	/// <summary>Second ability: <see cref="TryExecuteSoulWhisperOnBoard"/> (key 2 / second slot) — pay to convert civilians in a chosen area to crazies.</summary>
+	private const int SoulWhisperCardCurrencyCost = 3;
+	/// <summary>Chebyshev radius in <b>sim fine cells</b> from the click / cast center for <see cref="ConvertCiviliansInSoulWhisperRange"/>.</summary>
+	private const int SoulWhisperChebyshevRadiusFine = 20;
 	private const string GameOverScenePath = "res://scenes/game_over.tscn";
 	private const string WinGameScenePath = "res://scenes/win_game.tscn";
 	private const string ServantKillRoarSfxPath = "res://scenes/music/monster_roars.mp3";
@@ -143,7 +151,7 @@ public partial class GridSimulator : Node2D
 	private Servant? _lightningPendingServant;
 
 	/// <summary>Lowest token cost among ability cards; lose if below this with no living Servant.</summary>
-	public static int GetMinAbilityCardTokenCost() => ServantCardCurrencyCost;
+	public static int GetMinAbilityCardTokenCost() => Mathf.Min(ServantCardCurrencyCost, SoulWhisperCardCurrencyCost);
 	/// <summary>Also win if current tokens exceed this (exclusive: need 51+ when value is 50).</summary>
 	private const int PlayerCurrencyWinMinExclusive = 50;
 	/// <summary>Recruit a soldier from a building only while living civilian count is strictly greater than this.</summary>
@@ -192,6 +200,9 @@ public partial class GridSimulator : Node2D
 		_abilityCardSlot1Holder = GetNodeOrNull<Control>("UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder1");
 		if (_abilityCardSlot1Holder != null)
 			_abilityCardSlot1Holder.GuiInput += OnFirstAbilitySlotGuiInput;
+		_abilityCardSlot2Holder = GetNodeOrNull<Control>("UI/AbilityBar/AbilityMargin/AbilityCardRow/AbilityCardHolder2");
+		if (_abilityCardSlot2Holder != null)
+			_abilityCardSlot2Holder.GuiInput += OnSecondAbilitySlotGuiInput;
 		_controlPanel = GetNodeOrNull<GridControlPanel>("%ControlPanel");
 		_currencyBar = GetNodeOrNull<ProgressBar>("%CurrencyBar");
 		_currencyValueLabel = GetNodeOrNull<Label>("%CurrencyValueLabel");
@@ -327,28 +338,63 @@ public partial class GridSimulator : Node2D
 	{
 		if (_abilityCardSlot1Holder != null)
 			_abilityCardSlot1Holder.GuiInput -= OnFirstAbilitySlotGuiInput;
+		if (_abilityCardSlot2Holder != null)
+			_abilityCardSlot2Holder.GuiInput -= OnSecondAbilitySlotGuiInput;
 	}
 
 	public override void _UnhandledInput(InputEvent @event)
 	{
-		if (@event is not InputEventKey key || !key.Pressed || key.Echo)
-			return;
-
-		// Keep a minimal reset hotkey while the project is still scaffolding.
-		if (key.Keycode == Key.R)
+		if (@event is InputEventKey key && key.Pressed && !key.Echo)
 		{
-			UpdateBoardLayout();
-			UpdateHud();
-			QueueRedraw();
-			GetViewport().SetInputAsHandled();
+			// Keep a minimal reset hotkey while the project is still scaffolding.
+			if (key.Keycode == Key.R)
+			{
+				UpdateBoardLayout();
+				UpdateHud();
+				QueueRedraw();
+				GetViewport().SetInputAsHandled();
+				return;
+			}
+
+			// First ability slot: spend currency and spawn an additional Servant.
+			if (key.Keycode is Key.Key1 or Key.Kp1)
+			{
+				if (TryUseServantCard())
+					GetViewport().SetInputAsHandled();
+				return;
+			}
+
+			if (key.Keycode is Key.Key2 or Key.Kp2)
+			{
+				if (OnSoulWhisperKeyOrButton())
+					GetViewport().SetInputAsHandled();
+				return;
+			}
+
+			if (key.Keycode == Key.Escape && _soulWhisperTargeting)
+			{
+				_soulWhisperTargeting = false;
+				UpdateHud();
+				GetViewport().SetInputAsHandled();
+			}
 			return;
 		}
 
-		// First ability slot: spend currency and spawn an additional Servant.
-		if (key.Keycode is Key.Key1 or Key.Kp1)
+		if (@event is InputEventMouseButton mb && mb.Pressed)
 		{
-			if (TryUseServantCard())
+			if (mb.ButtonIndex == MouseButton.Right && _soulWhisperTargeting)
+			{
+				_soulWhisperTargeting = false;
+				UpdateHud();
 				GetViewport().SetInputAsHandled();
+				return;
+			}
+			if (mb.ButtonIndex == MouseButton.Left && _soulWhisperTargeting
+			    && TryGetFineCellUnderGlobalMouse(out var cell))
+			{
+				TryExecuteSoulWhisperOnBoard(cell);
+				GetViewport().SetInputAsHandled();
+			}
 		}
 	}
 
@@ -432,6 +478,143 @@ public partial class GridSimulator : Node2D
 			return;
 		if (TryUseServantCard())
 			_abilityCardSlot1Holder?.AcceptEvent();
+	}
+
+	private void OnSecondAbilitySlotGuiInput(InputEvent @event)
+	{
+		if (@event is not InputEventMouseButton mb || !mb.Pressed || mb.ButtonIndex != MouseButton.Left)
+			return;
+		if (OnSoulWhisperKeyOrButton())
+			_abilityCardSlot2Holder?.AcceptEvent();
+	}
+
+	/// <summary>Toggle Soul Whisper arming, or disarm. Also spawns a random <see cref="EnemyType.Crazy"/> when arming. Tokens for the area conversion are only spent on a successful map click.</summary>
+	private bool OnSoulWhisperKeyOrButton()
+	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return false;
+		if (_soulWhisperTargeting)
+		{
+			_soulWhisperTargeting = false;
+			UpdateHud();
+			return true;
+		}
+		if (_playerCurrency < SoulWhisperCardCurrencyCost)
+			return false;
+		SpawnRandomCrazyOnSoulWhisperArm();
+		_soulWhisperTargeting = true;
+		UpdateHud();
+		return true;
+	}
+
+	/// <summary>Instant spawn: one new Crazy on a random free walkable cell (used when second ability is armed via key 2 or card click).</summary>
+	private void SpawnRandomCrazyOnSoulWhisperArm()
+	{
+		const int maxTries = 200;
+		for (var t = 0; t < maxTries; t++)
+		{
+			var cell = FindRandomValidDestinationCell();
+			if (IsCellOccupiedByAnyGroundUnit(cell))
+				continue;
+			var e = EnemyCharacter.CreateByType(EnemyType.Crazy, cell, $"Roused Crazy {_rng.RandiRange(100, 999)}", null);
+			e.Destination = FindRandomValidDestinationCell(e.Cell);
+			_enemies.Add(e);
+			EnsureEnemyPathStateSize();
+			TryReplanEnemyPathWithDestinationFallback(_enemies.Count - 1);
+			RecalculateCivilianFleeDestinationsFromCurrentEnemies();
+			QueueRedraw();
+			return;
+		}
+	}
+
+	/// <summary>Board hit test: fine sim cell under the global mouse, same space as <see cref="_boardGridOrigin"/> / <see cref="_Draw"/>.</summary>
+	private bool TryGetFineCellUnderGlobalMouse(out Vector2I cell)
+	{
+		cell = default;
+		var s = _boardPixelsPerCell;
+		if (s <= 0f)
+			return false;
+		var p = GetGlobalMousePosition();
+		var ox = p.X - _boardGridOrigin.X;
+		var oy = p.Y - _boardGridOrigin.Y;
+		if (ox < 0f || oy < 0f)
+			return false;
+		var gx = (int)(ox / s);
+		var gy = (int)(oy / s);
+		if (gx < 0 || gy < 0 || gx >= GridWidth || gy >= GridHeight)
+			return false;
+		cell = new Vector2I(gx, gy);
+		return true;
+	}
+
+	private static bool HasLivingCivilianInSoulWhisperRange(Vector2I center, int radiusChebyshevFine, IReadOnlyList<ColonyCharacter> colonists)
+	{
+		for (var i = 0; i < colonists.Count; i++)
+		{
+			var ch = colonists[i];
+			if (!ch.IsAlive || ch.Type != ColonyCharacterType.Civilian)
+				continue;
+			if (ChebyshevDistance(ch.Cell, center) <= radiusChebyshevFine)
+				return true;
+		}
+		return false;
+	}
+
+	/// <summary>Spend <see cref="SoulWhisperCardCurrencyCost"/>, turn matching civilians in range into <see cref="EnemyType.Crazy"/>. Fails (no cost) if no one to convert; keeps <see cref="_soulWhisperTargeting"/> until success or cancel.</summary>
+	private void TryExecuteSoulWhisperOnBoard(Vector2I center)
+	{
+		if (!_soulWhisperTargeting)
+			return;
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+		{
+			_soulWhisperTargeting = false;
+			UpdateHud();
+			return;
+		}
+		if (_playerCurrency < SoulWhisperCardCurrencyCost)
+		{
+			_soulWhisperTargeting = false;
+			UpdateHud();
+			return;
+		}
+		if (!HasLivingCivilianInSoulWhisperRange(center, SoulWhisperChebyshevRadiusFine, _characters))
+			return;
+		PlayerCurrency = _playerCurrency - SoulWhisperCardCurrencyCost;
+		ConvertCiviliansInSoulWhisperRange(center);
+		_soulWhisperTargeting = false;
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private void ConvertCiviliansInSoulWhisperRange(Vector2I center)
+	{
+		var r = SoulWhisperChebyshevRadiusFine;
+		for (var i = _characters.Count - 1; i >= 0; i--)
+		{
+			var ch = _characters[i];
+			if (!ch.IsAlive || ch.Type != ColonyCharacterType.Civilian)
+				continue;
+			if (ChebyshevDistance(ch.Cell, center) > r)
+				continue;
+			var cell = ch.Cell;
+			var label = ch.DisplayName;
+			_characters.RemoveAt(i);
+			_characterPathQueues.RemoveAt(i);
+			_characterMoveBudget.RemoveAt(i);
+			_characterRestSecondsRemaining.RemoveAt(i);
+			var e = EnemyCharacter.CreateByType(EnemyType.Crazy, cell, $"Whispered: {label}", null);
+			e.Destination = FindRandomValidDestinationCell(e.Cell);
+			_enemies.Add(e);
+			EnsureEnemyPathStateSize();
+			TryReplanEnemyPathWithDestinationFallback(_enemies.Count - 1);
+		}
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
+		EnsurePathStateSize();
+		for (var j = 0; j < _characters.Count; j++)
+		{
+			if (_characters[j].IsAlive)
+				TryReplanPathWithDestinationFallback(j);
+		}
 	}
 
 	public override void _Process(double delta)
@@ -869,7 +1052,10 @@ public partial class GridSimulator : Node2D
 		{
 			var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
 			var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
-			_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
+			var soul = _soulWhisperTargeting
+				? " | Soul Whisper: left-click the map to cast (empty click keeps aim; Esc / right-click to cancel)"
+				: "";
+			_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}{soul}";
 		}
 		if (_statsLabel != null)
 		{
