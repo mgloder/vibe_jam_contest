@@ -5,8 +5,8 @@ using System.Collections.Generic;
 /// Monster: Servant, drawn as a Cthulhu-style silhouette.
 /// Renders at <see cref="PixelScaleMultiplierVsCharacter"/> times the same base pixel size used for <see cref="ColonyCharacter"/> art.
 /// Pathfinding in <see cref="GridSimulator"/> uses the same 4-way <c>GridAStar</c> as other units, with
-/// a walkable test so the full token board never covers water (or buildings). Combat only chases
-/// and damages <see cref="ColonyCharacter.IsAlive"/> characters.
+/// a walkable test so the full token board never covers water (or buildings). Melee: Chebyshev ≤1
+/// (3×3) from <see cref="Cell"/>; takes damage from <see cref="ColonyCharacter"/> ranged/melee in range.
 /// </summary>
 public sealed class Servant
 {
@@ -15,11 +15,16 @@ public sealed class Servant
 	/// <summary>Draw with <c>colonyCharacterPixelScale * this</c> (1× matches NPC token size).</summary>
 	public const int PixelScaleMultiplierVsCharacter = 1;
 
-	/// <summary>Damage per hit when in melee range to a <see cref="ColonyCharacter"/>.</summary>
-	public const int AttackDamage = 1;
+	/// <summary>Damage per hit when in melee (3×3) range to a <see cref="ColonyCharacter"/>.</summary>
+	public const int AttackDamage = 2;
+
+	/// <summary>Design: major steps per second (same baseline as 2.0 = “100%” on cost-1 tiles).</summary>
+	public const float MajorStepsPerSecond = 2f;
 
 	public string DisplayName { get; }
 	public Vector2I Cell { get; set; }
+	public int MaxHealth { get; }
+	public int Health { get; set; }
 
 	/// <summary>Rows top-to-bottom; each row same width. '.' = transparent.</summary>
 	public string[] SpriteRows { get; }
@@ -29,6 +34,8 @@ public sealed class Servant
 	private Servant(
 		string displayName,
 		Vector2I cell,
+		int maxHealth,
+		int health,
 		string[] spriteRows,
 		Vector2I spritePivot,
 		IReadOnlyDictionary<char, Color> palette
@@ -36,15 +43,21 @@ public sealed class Servant
 	{
 		DisplayName = displayName;
 		Cell = cell;
+		MaxHealth = maxHealth;
+		Health = health;
 		SpriteRows = spriteRows;
 		SpritePivot = spritePivot;
 		Palette = palette;
 	}
 
+	public const int DefaultMaxHealth = 6;
+
 	public static Servant CreateAt(Vector2I cell, string? displayName = null) =>
 		new(
 			displayName ?? DefaultDisplayName,
 			cell,
+			DefaultMaxHealth,
+			DefaultMaxHealth,
 			BuildCthulhuShapeRows(),
 			new Vector2I(8, 12),
 			BuildCthulhuPalette()

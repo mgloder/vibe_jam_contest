@@ -2,18 +2,15 @@ using Godot;
 using System;
 using System.Collections.Generic;
 
-public enum ColonyCharacterType
-{
-	Civilian,
-	Expert,
-	Soldier
-}
-
 public enum CharacterToolType
 {
 	None,
 	Hammer,
-	ShortGun
+	ShortGun,
+	/// <summary>Enemy: Crazy.</summary>
+	Blade,
+	/// <summary>Enemy: Monster.</summary>
+	Claw
 }
 
 public sealed class ColonyCharacter
@@ -24,15 +21,17 @@ public sealed class ColonyCharacter
 	public string DisplayName { get; set; }
 	public Vector2I Cell { get; set; }
 	public Vector2I Destination { get; set; }
-	/// <summary>Current hit points. Civilian: 1; Soldier: 2; Expert: 4.</summary>
 	public int Health { get; set; }
-	/// <summary>True if this unit can act as a valid combat/collision target (corpses are <see cref="IsAlive"/> false).</summary>
 	public bool IsAlive => Health > 0;
 	public int MaxHealth { get; }
-	/// <summary>Attack power. Civilian: 0; Soldier: 1; Expert: 3.</summary>
 	public int Attack { get; }
-	/// <summary>True if <see cref="Attack"/> is greater than zero.</summary>
 	public bool CanAttack => Attack > 0;
+	/// <summary>0 = no combat. 1 = 3×3 (Chebyshev ≤1). 2 = 5×5 (Chebyshev ≤2).</summary>
+	public int AttackRangeChebyshev { get; }
+	/// <summary>How many <b>different</b> targets this unit can strike per resolution step.</summary>
+	public int MaxAttackTargets { get; }
+	/// <summary>Design speed: major grid steps (≈<see cref="GridSimulator.MinGridLineStepCells"/> cells) per second on cost-1 tiles.</summary>
+	public float MajorStepsPerSecond { get; }
 	public string[] SpriteRows { get; }
 	public Vector2I SpritePivot { get; }
 	public IReadOnlyDictionary<char, Color> Palette { get; }
@@ -50,6 +49,9 @@ public sealed class ColonyCharacter
 		int maxHealth,
 		int health,
 		int attack,
+		int attackRangeChebyshev,
+		int maxAttackTargets,
+		float majorStepsPerSecond,
 		string[] spriteRows,
 		Vector2I spritePivot,
 		IReadOnlyDictionary<char, Color> palette,
@@ -67,6 +69,9 @@ public sealed class ColonyCharacter
 		MaxHealth = maxHealth;
 		Health = health;
 		Attack = attack;
+		AttackRangeChebyshev = attackRangeChebyshev;
+		MaxAttackTargets = maxAttackTargets;
+		MajorStepsPerSecond = majorStepsPerSecond;
 		SpriteRows = spriteRows;
 		SpritePivot = spritePivot;
 		Palette = palette;
@@ -75,10 +80,8 @@ public sealed class ColonyCharacter
 		ToolPalette = toolPalette;
 	}
 
-	public static ColonyCharacter CreateStarter(Vector2I cell)
-	{
-		return CreateByType(ColonyCharacterType.Civilian, cell, "Starter Civilian");
-	}
+	public static ColonyCharacter CreateStarter(Vector2I cell) =>
+		CreateByType(ColonyCharacterType.Civilian, cell, "Starter Civilian");
 
 	public static ColonyCharacter CreateByType(ColonyCharacterType type, Vector2I cell, string? displayName = null, Vector2I? destination = null)
 	{
@@ -90,38 +93,40 @@ public sealed class ColonyCharacter
 			_ => BuildCivilianVisual()
 		};
 
-		var (maxHealth, attack) = type switch
+		var (maxHealth, attack, rCheb, maxTargets, majPerS) = type switch
 		{
-			ColonyCharacterType.Civilian => (1, 0),
-			ColonyCharacterType.Expert => (4, 3),
-			ColonyCharacterType.Soldier => (2, 1),
-			_ => (1, 0)
+			ColonyCharacterType.Civilian => (1, 0, 0, 0, 2f),
+			ColonyCharacterType.Expert => (6, 3, 2, 1, 1.33f),
+			ColonyCharacterType.Soldier => (2, 1, 2, 1, 2f),
+			_ => (1, 0, 0, 0, 2f)
 		};
 
 		return new ColonyCharacter(
-			id: Guid.NewGuid().ToString("N"),
-			type: type,
-			tool: tool,
-			displayName: displayName ?? defaultName,
-			cell: cell,
-			destination: destination ?? cell,
-			maxHealth: maxHealth,
-			health: maxHealth,
-			attack: attack,
-			spriteRows: spriteRows,
-			spritePivot: new Vector2I(3, 4),
-			palette: palette,
-			toolRows: toolRows,
-			toolPivot: new Vector2I(3, 4),
-			toolPalette: toolPalette
+			Guid.NewGuid().ToString("N"),
+			type,
+			tool,
+			displayName ?? defaultName,
+			cell,
+			destination ?? cell,
+			maxHealth,
+			maxHealth,
+			attack,
+			rCheb,
+			maxTargets,
+			majPerS,
+			spriteRows,
+			new Vector2I(3, 4),
+			palette,
+			toolRows,
+			new Vector2I(3, 4),
+			toolPalette
 		);
 	}
 
 	public static ColonyCharacter CreateRandomized(Vector2I cell, RandomNumberGenerator rng)
 	{
 		var type = (ColonyCharacterType)rng.RandiRange(0, 2);
-		var name = $"{type} {rng.RandiRange(100, 999)}";
-		return CreateByType(type, cell, name);
+		return CreateByType(type, cell, $"{type} {rng.RandiRange(100, 999)}");
 	}
 
 	private static (string[] spriteRows, Dictionary<char, Color> palette, string[] toolRows, Dictionary<char, Color> toolPalette, CharacterToolType tool, string defaultName) BuildCivilianVisual()
@@ -191,8 +196,8 @@ public sealed class ColonyCharacter
 			},
 			new Dictionary<char, Color>
 			{
-				['M'] = new Color(0.58f, 0.60f, 0.64f), // hammer head
-				['H'] = new Color(0.48f, 0.30f, 0.16f)  // wooden handle
+				['M'] = new Color(0.58f, 0.60f, 0.64f),
+				['H'] = new Color(0.48f, 0.30f, 0.16f)
 			},
 			CharacterToolType.Hammer,
 			"Expert"
@@ -236,8 +241,8 @@ public sealed class ColonyCharacter
 			},
 			new Dictionary<char, Color>
 			{
-				['G'] = new Color(0.18f, 0.20f, 0.24f), // gun body
-				['B'] = new Color(0.48f, 0.52f, 0.58f)  // gun highlights
+				['G'] = new Color(0.18f, 0.20f, 0.24f),
+				['B'] = new Color(0.48f, 0.52f, 0.58f)
 			},
 			CharacterToolType.ShortGun,
 			"Soldier"

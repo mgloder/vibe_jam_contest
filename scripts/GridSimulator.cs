@@ -12,7 +12,7 @@ public partial class GridSimulator : Node2D
 	public int GridHeight { get; set; } = 540;
 
 	[Export]
-	public int CellSize { get; set; } = 1;
+	public int CellSize { get; set; } = 2;
 
 	[Export]
 	public int BuildingGrowthPerTick { get; set; } = 3;
@@ -28,6 +28,9 @@ public partial class GridSimulator : Node2D
 	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private readonly List<ColonyCharacter> _characters = new();
+	private readonly List<EnemyCharacter> _enemies = new();
+	private readonly List<Queue<Vector2I>> _enemyPathQueues = new();
+	private readonly List<float> _enemyMoveBudget = new();
 	private Servant? _servant;
 	private Vector2I? _servantPursueCell;
 	private readonly Queue<Vector2I> _servantPathQueue = new();
@@ -50,9 +53,10 @@ public partial class GridSimulator : Node2D
 	private int _buildingHeightCells;
 	private Texture2D _buildingTexture = null!;
 	private const int BuildingSizeMultiplier = 2;
-	private const int MinGridLineStepCells = 10;
-	/// <summary>Seconds between path-movement ticks. Each tick adds <see cref="MovementBudgetPerGridMajorStep"/> to spend on cells.</summary>
-	private const float CharacterMoveStepSec = 0.5f;
+	/// <summary>Major grid line spacing in cell units (one “major step” in design docs).</summary>
+	public const int MinGridLineStepCells = 10;
+	/// <summary>Seconds between path-movement ticks. Smaller = smoother motion; each tick accrues budget for 4-way steps.</summary>
+	private const float CharacterMoveStepSec = 0.1f;
 	/// <summary>
 	/// Budget units added each tick, aligned to the major grid: enough to cross one 10-cell span
 	/// on default-cost terrain in one tick (flat ground uses 1 unit per cell; forest uses 2).
@@ -60,8 +64,6 @@ public partial class GridSimulator : Node2D
 	private const int MovementBudgetPerGridMajorStep = MinGridLineStepCells;
 	private const int DefaultTerrainMoveCost = 1;
 	private const int ForestTerrainMoveCost = 2; // 0.5x speed
-	/// <summary>Manhattan reach for Servant attacks, aligned to one major grid line step.</summary>
-	private const int ServantAttackRangeCells = MinGridLineStepCells;
 	/// <summary>Seconds the Servant pauses after a strike (no move, no attack).</summary>
 	private const float ServantPostAttackStopSec = 1f;
 	private static readonly string[] LayingDownSpriteRows =
@@ -96,6 +98,9 @@ public partial class GridSimulator : Node2D
 		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
 		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
 
+		// Ensure the simulator node processes even if parent/owner toggles process mode.
+		SetProcess(true);
+
 		_terrain = new TerrainType[GridWidth, GridHeight];
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		_buildingTexture = GD.Load<Texture2D>("res://sprites/buildings/building.png");
@@ -106,15 +111,21 @@ public partial class GridSimulator : Node2D
 		AddChild(_buildingGrowthTimer);
 
 		InitializeStartingCharacters();
+		InitializeStartingEnemies();
 		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		RelocateEnemiesToWalkableGround();
 		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
+		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
+		EnsureEnemyPathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
+		for (var pe = 0; pe < _enemies.Count; pe++)
+			TryReplanEnemyPathWithDestinationFallback(pe);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		UpdateHud();
@@ -202,22 +213,34 @@ public partial class GridSimulator : Node2D
 					DrawCharacterDestination(_characters[i], origin);
 				DrawCharacter(_characters[i], origin);
 			}
+			for (var ei = 0; ei < _enemies.Count; ei++)
+			{
+				if (_enemies[ei].Health > 0)
+					DrawCharacterDestinationForEnemy(_enemies[ei], origin);
+				DrawEnemy(_enemies[ei], origin);
+			}
 			if (_servant != null)
-				DrawServant(_servant, origin);
+				DrawServant(_servant, origin, drawDead: _servant.Health <= 0);
 		}
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
 	}
 
-	private void DrawCharacterDestination(ColonyCharacter character, Vector2 gridOrigin)
+	private void DrawCharacterDestination(ColonyCharacter character, Vector2 gridOrigin) =>
+		DrawUnitDestinationRect(character.Destination, gridOrigin, new Color(0.93f, 0.86f, 0.22f, 0.92f));
+
+	private void DrawCharacterDestinationForEnemy(EnemyCharacter enemy, Vector2 gridOrigin) =>
+		DrawUnitDestinationRect(enemy.Destination, gridOrigin, new Color(0.93f, 0.55f, 0.22f, 0.92f));
+
+	private void DrawUnitDestinationRect(Vector2I destination, Vector2 gridOrigin, Color color)
 	{
-		var markerTopLeft = gridOrigin + new Vector2(character.Destination.X * CellSize, character.Destination.Y * CellSize);
+		var markerTopLeft = gridOrigin + new Vector2(destination.X * CellSize, destination.Y * CellSize);
 		var markerSize = Mathf.Max(1f, CellSize);
 		var inset = markerSize <= 2f ? 0f : 1f;
 		var rect = new Rect2(
 			markerTopLeft + new Vector2(inset, inset),
 			new Vector2(Mathf.Max(1f, markerSize - inset * 2f), Mathf.Max(1f, markerSize - inset * 2f))
 		);
-		DrawRect(rect, new Color(0.93f, 0.86f, 0.22f, 0.92f), false, 1f);
+		DrawRect(rect, color, false, 1f);
 	}
 
 	private void DrawCharacter(ColonyCharacter character, Vector2 gridOrigin)
@@ -250,7 +273,37 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
-		DrawNpcTool(character, cellTopLeft, pixelScale);
+		DrawNpcToolColony(character, cellTopLeft, pixelScale);
+	}
+
+	private void DrawEnemy(EnemyCharacter e, Vector2 gridOrigin)
+	{
+		var cellTopLeft = gridOrigin + new Vector2(e.Cell.X * CellSize, e.Cell.Y * CellSize);
+		var pixelScale = Mathf.Max(2, CellSize * 2);
+		if (e.Health <= 0)
+		{
+			DrawLayingDownCharacter(cellTopLeft, pixelScale);
+			return;
+		}
+
+		for (var y = 0; y < e.SpriteRows.Length; y++)
+		{
+			var row = e.SpriteRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				var token = row[x];
+				if (token == '.')
+					continue;
+				if (!e.Palette.TryGetValue(token, out var color))
+					continue;
+				var px = cellTopLeft + new Vector2(
+					(x - e.SpritePivot.X) * pixelScale,
+					(y - e.SpritePivot.Y) * pixelScale
+				);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
+		DrawNpcToolEnemy(e, cellTopLeft, pixelScale);
 	}
 
 	/// <summary>Prone silhouette when <see cref="ColonyCharacter.Health"/> is 0 (body remains on the map).</summary>
@@ -277,10 +330,16 @@ public partial class GridSimulator : Node2D
 	}
 
 	/// <summary>Same token/sprite path as <see cref="DrawCharacter"/>, with per-token size scaled by <see cref="Servant.PixelScaleMultiplierVsCharacter"/>.</summary>
-	private void DrawServant(Servant servant, Vector2 gridOrigin)
+	private void DrawServant(Servant servant, Vector2 gridOrigin, bool drawDead)
 	{
 		var cellTopLeft = gridOrigin + new Vector2(servant.Cell.X * CellSize, servant.Cell.Y * CellSize);
 		var basePixel = Mathf.Max(2, CellSize * 2);
+		if (drawDead)
+		{
+			DrawLayingDownCharacter(cellTopLeft, basePixel);
+			return;
+		}
+
 		var pixelScale = basePixel * Servant.PixelScaleMultiplierVsCharacter;
 
 		for (var y = 0; y < servant.SpriteRows.Length; y++)
@@ -303,7 +362,7 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	private void DrawNpcTool(ColonyCharacter character, Vector2 cellTopLeft, float pixelScale)
+	private void DrawNpcToolColony(ColonyCharacter character, Vector2 cellTopLeft, float pixelScale)
 	{
 		if (character.Tool == CharacterToolType.None || character.ToolRows.Length == 0)
 			return;
@@ -322,6 +381,29 @@ public partial class GridSimulator : Node2D
 				var px = cellTopLeft + new Vector2(
 					(x - character.ToolPivot.X) * pixelScale,
 					(y - character.ToolPivot.Y) * pixelScale
+				);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
+	}
+
+	private void DrawNpcToolEnemy(EnemyCharacter e, Vector2 cellTopLeft, float pixelScale)
+	{
+		if (e.Tool == CharacterToolType.None || e.ToolRows.Length == 0)
+			return;
+		for (var y = 0; y < e.ToolRows.Length; y++)
+		{
+			var row = e.ToolRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				var token = row[x];
+				if (token == '.')
+					continue;
+				if (!e.ToolPalette.TryGetValue(token, out var color))
+					continue;
+				var px = cellTopLeft + new Vector2(
+					(x - e.ToolPivot.X) * pixelScale,
+					(y - e.ToolPivot.Y) * pixelScale
 				);
 				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
 			}
@@ -363,13 +445,19 @@ public partial class GridSimulator : Node2D
 		var civilianCount = _characters.Count(c => c.Type == ColonyCharacterType.Civilian);
 		var expertCount = _characters.Count(c => c.Type == ColonyCharacterType.Expert);
 		var soldierCount = _characters.Count(c => c.Type == ColonyCharacterType.Soldier);
+		var crazyCount = _enemies.Count(c => c.Type == EnemyType.Crazy);
+		var monsterCount = _enemies.Count(c => c.Type == EnemyType.Monster);
 		var profileC = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Civilian);
 		var profileE = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Expert);
 		var profileS = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Soldier);
+		var profileCr = _enemies.FirstOrDefault(c => c.Type == EnemyType.Crazy);
+		var profileM = _enemies.FirstOrDefault(c => c.Type == EnemyType.Monster);
 		var civStr = profileC != null ? $"{profileC.MaxHealth}HP/{profileC.Attack}atk" : "1/0";
-		var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "4/3";
+		var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "6/3";
 		var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPCs: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  |  NPC State: {visibility}";
+		var crStr = profileCr != null ? $"{profileCr.MaxHealth}HP/{profileCr.Attack}atk" : "2/1";
+		var mStr = profileM != null ? $"{profileM.MaxHealth}HP/{profileM.Attack}atk" : "3/2";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  Colony: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  Enemies: {_enemies.Count} (Cr:{crazyCount} M:{monsterCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  Cr {crStr}  M {mStr}  |  NPC State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
 	}
@@ -381,10 +469,18 @@ public partial class GridSimulator : Node2D
 			var current = _characters[i];
 			_characters[i] = ColonyCharacter.CreateByType(current.Type, current.Cell, current.DisplayName, current.Destination);
 		}
+		for (var e = 0; e < _enemies.Count; e++)
+		{
+			var cur = _enemies[e];
+			_enemies[e] = EnemyCharacter.CreateByType(cur.Type, cur.Cell, cur.DisplayName, cur.Destination);
+		}
 		EnsurePathStateSize();
+		EnsureEnemyPathStateSize();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		for (var ri = 0; ri < _characters.Count; ri++)
 			TryReplanPathWithDestinationFallback(ri);
+		for (var re = 0; re < _enemies.Count; re++)
+			TryReplanEnemyPathWithDestinationFallback(re);
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -416,14 +512,20 @@ public partial class GridSimulator : Node2D
 	{
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		RelocateCharactersToWalkableGround();
+		RelocateEnemiesToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		RelocateEnemiesToWalkableGround();
 		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
+		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
+		EnsureEnemyPathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
+		for (var pe = 0; pe < _enemies.Count; pe++)
+			TryReplanEnemyPathWithDestinationFallback(pe);
 		QueueRedraw();
 	}
 
@@ -438,11 +540,16 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
+		RelocateEnemiesToWalkableGround();
 		EnsureCharacterDestinationsAreValid();
+		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
+		EnsureEnemyPathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
+		for (var pe = 0; pe < _enemies.Count; pe++)
+			TryReplanEnemyPathWithDestinationFallback(pe);
 		EnsureServantOnWalkable();
 		QueueRedraw();
 	}
@@ -454,14 +561,20 @@ public partial class GridSimulator : Node2D
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		RelocateCharactersToWalkableGround();
+		RelocateEnemiesToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		RelocateEnemiesToWalkableGround();
 		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
+		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
+		EnsureEnemyPathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
+		for (var pe = 0; pe < _enemies.Count; pe++)
+			TryReplanEnemyPathWithDestinationFallback(pe);
 		QueueRedraw();
 	}
 
@@ -611,12 +724,10 @@ public partial class GridSimulator : Node2D
 	{
 		_characters.Clear();
 		var center = new Vector2I(GridWidth / 2, GridHeight / 2);
-		var spawnCells = BuildSpawnCells(center, 10, spacing: 12);
+		var spawnCells = BuildSpawnCells(center, 8, spacing: 12);
 
 		var spawnPlan = new[]
 		{
-			ColonyCharacterType.Civilian,
-			ColonyCharacterType.Civilian,
 			ColonyCharacterType.Civilian,
 			ColonyCharacterType.Civilian,
 			ColonyCharacterType.Civilian,
@@ -641,8 +752,19 @@ public partial class GridSimulator : Node2D
 			var c = _characters[j];
 			c.Destination = c.Type == ColonyCharacterType.Civilian
 				? FindCivilianFleeDestination(c, c.Cell)
-				: FindRandomValidDestinationCell();
+				: FindRandomValidDestinationCell(c.Cell);
 		}
+	}
+
+	private void InitializeStartingEnemies()
+	{
+		_enemies.Clear();
+		var crCell = FindRandomValidDestinationCell();
+		_enemies.Add(EnemyCharacter.CreateByType(EnemyType.Crazy, crCell, "Crazy 1", null));
+		var moCell = FindRandomValidDestinationCell(crCell);
+		_enemies.Add(EnemyCharacter.CreateByType(EnemyType.Monster, moCell, "Monster 1", null));
+		for (var j = 0; j < _enemies.Count; j++)
+			_enemies[j].Destination = FindRandomValidDestinationCell(_enemies[j].Cell);
 	}
 
 	private List<Vector2I> BuildSpawnCells(Vector2I center, int count, int spacing)
@@ -679,15 +801,23 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Spawn/refresh the Cthulhu token sprite east of map center; anchor is BFSed so the full token board avoids water and buildings (see <see cref="IsWalkableForServantAnchorCell(Servant, Vector2I)"/>).</summary>
+	private void RelocateEnemiesToWalkableGround()
+	{
+		for (var i = 0; i < _enemies.Count; i++)
+		{
+			var e = _enemies[i];
+			if (e.Health <= 0)
+				continue;
+			if (IsWalkableCharacterCell(e.Cell))
+				continue;
+			e.Cell = FindNearestWalkableCell(e.Cell);
+		}
+	}
+
+	/// <summary>Spawn/refresh the Cthulhu token at a random valid anchor; BFS nudges the anchor so the full token avoids water and buildings (see <see cref="IsWalkableForServantAnchorCell(Servant, Vector2I)"/>).</summary>
 	private void PlaceServant()
 	{
-		var center = new Vector2I(GridWidth / 2, GridHeight / 2);
-		var preferred = new Vector2I(
-			Mathf.Clamp(center.X + 64, 0, GridWidth - 1),
-			Mathf.Clamp(center.Y + 32, 0, GridHeight - 1)
-		);
-		var start = FindNearestWalkableCell(preferred);
+		var start = FindRandomValidDestinationCell();
 		var proto = Servant.CreateAt(start);
 		var cell = FindNearestCellSatisfying(start, a => IsWalkableForServantAnchorCell(proto, a));
 		proto.Cell = cell;
@@ -715,6 +845,14 @@ public partial class GridSimulator : Node2D
 		_characterMoveBudget[index] = 0f;
 	}
 
+	private void OnEnemyDied(int index)
+	{
+		var e = _enemies[index];
+		e.Destination = e.Cell;
+		_enemyPathQueues[index].Clear();
+		_enemyMoveBudget[index] = 0f;
+	}
+
 	private void EnsureCharacterDestinationsAreValid()
 	{
 		for (var i = 0; i < _characters.Count; i++)
@@ -733,6 +871,22 @@ public partial class GridSimulator : Node2D
 					? FindCivilianFleeDestination(character, character.Cell)
 					: FindRandomValidDestinationCell(character.Cell);
 			}
+		}
+	}
+
+	private void EnsureEnemyDestinationsAreValid()
+	{
+		for (var i = 0; i < _enemies.Count; i++)
+		{
+			var e = _enemies[i];
+			if (e.Health <= 0)
+			{
+				e.Destination = e.Cell;
+				continue;
+			}
+			var d = e.Destination;
+			if (d.X < 0 || d.Y < 0 || d.X >= GridWidth || d.Y >= GridHeight || !IsValidDestinationCell(d))
+				e.Destination = FindRandomValidDestinationCell(e.Cell);
 		}
 	}
 
@@ -817,6 +971,20 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
+	private void EnsureEnemyPathStateSize()
+	{
+		while (_enemyPathQueues.Count < _enemies.Count)
+		{
+			_enemyPathQueues.Add(new Queue<Vector2I>());
+			_enemyMoveBudget.Add(0f);
+		}
+		while (_enemyPathQueues.Count > _enemies.Count)
+		{
+			_enemyPathQueues.RemoveAt(_enemyPathQueues.Count - 1);
+			_enemyMoveBudget.RemoveAt(_enemyMoveBudget.Count - 1);
+		}
+	}
+
 	private bool ReplanCharacterPath(int index)
 	{
 		EnsurePathStateSize();
@@ -857,6 +1025,42 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
+	private bool ReplanEnemyPath(int index)
+	{
+		EnsureEnemyPathStateSize();
+		var e = _enemies[index];
+		var pathQueue = _enemyPathQueues[index];
+		pathQueue.Clear();
+		_enemyMoveBudget[index] = 0f;
+		if (e.Cell == e.Destination)
+			return true;
+		var fullPath = GridAStar.FindPath(
+			GridWidth,
+			GridHeight,
+			e.Cell,
+			e.Destination,
+			IsWalkableCharacterCell,
+			GetPathMoveCost
+		);
+		if (fullPath == null)
+			return false;
+		for (var s = 1; s < fullPath.Count; s++)
+			pathQueue.Enqueue(fullPath[s]);
+		return true;
+	}
+
+	private void TryReplanEnemyPathWithDestinationFallback(int index)
+	{
+		if (ReplanEnemyPath(index))
+			return;
+		for (var attempt = 0; attempt < 8; attempt++)
+		{
+			_enemies[index].Destination = FindRandomValidDestinationCell(_enemies[index].Cell);
+			if (ReplanEnemyPath(index))
+				return;
+		}
+	}
+
 	private void StepCharactersTowardDestination()
 	{
 		EnsurePathStateSize();
@@ -874,7 +1078,7 @@ public partial class GridSimulator : Node2D
 				continue;
 			}
 
-			_characterMoveBudget[i] += MovementBudgetPerGridMajorStep;
+			_characterMoveBudget[i] += MovementBudgetPerGridMajorStep * (character.MajorStepsPerSecond / 2f);
 			var moved = false;
 			while (_characterMoveBudget[i] > 0f)
 			{
@@ -935,14 +1139,200 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
+		EnsureEnemyPathStateSize();
+		for (var ei = 0; ei < _enemies.Count; ei++)
+		{
+			var e = _enemies[ei];
+			var pathQueue = _enemyPathQueues[ei];
+			if (e.Health <= 0)
+				continue;
+			if (e.Cell == e.Destination)
+			{
+				e.Destination = FindNewDestinationAfterArrivalEnemy(e);
+				TryReplanEnemyPathWithDestinationFallback(ei);
+				continue;
+			}
+			_enemyMoveBudget[ei] += MovementBudgetPerGridMajorStep * (e.MajorStepsPerSecond / 2f);
+			var movedEnemy = false;
+			while (_enemyMoveBudget[ei] > 0f)
+			{
+				if (pathQueue.Count == 0)
+				{
+					if (!ReplanEnemyPath(ei))
+						TryReplanEnemyPathWithDestinationFallback(ei);
+					if (pathQueue.Count == 0)
+						break;
+				}
+				var next = pathQueue.Peek();
+				var distE = Mathf.Abs(next.X - e.Cell.X) + Mathf.Abs(next.Y - e.Cell.Y);
+				if (distE != 1)
+				{
+					ReplanEnemyPath(ei);
+					if (pathQueue.Count == 0)
+						TryReplanEnemyPathWithDestinationFallback(ei);
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+				if (!IsWalkableCharacterCell(next))
+				{
+					ReplanEnemyPath(ei);
+					if (pathQueue.Count == 0)
+						TryReplanEnemyPathWithDestinationFallback(ei);
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+				var costE = (float)GetPathMoveCost(next);
+				if (_enemyMoveBudget[ei] < costE)
+					break;
+				_enemyMoveBudget[ei] -= costE;
+				pathQueue.Dequeue();
+				e.Cell = next;
+				movedEnemy = true;
+			}
+			if (movedEnemy && e.Cell == e.Destination)
+				pathQueue.Clear();
+		}
+
+		StepEnemyCombat();
+		StepColonyCharacterCombat();
 		StepServant();
 	}
 
-	/// <summary>Chase the closest (by board-to-board border gap) <see cref="ColonyCharacter"/>; in range when L1 gap from Servant board to NPC board ≤ one major step (overlapping boards = gap 0).</summary>
+	/// <summary>Enemies only hit colonists, not the Servant or each other.</summary>
+	private void StepEnemyCombat()
+	{
+		for (var ei = 0; ei < _enemies.Count; ei++)
+		{
+			var a = _enemies[ei];
+			if (!a.IsAlive || !a.CanAttack)
+				continue;
+			var r = a.AttackRangeChebyshev;
+			if (r <= 0)
+				continue;
+			var pool = new List<(int manh, int j)>();
+			for (var j = 0; j < _characters.Count; j++)
+			{
+				var t = _characters[j];
+				if (!t.IsAlive)
+					continue;
+				if (ChebyshevDistance(a.Cell, t.Cell) > r)
+					continue;
+				pool.Add((ManhattanDistance(a.Cell, t.Cell), j));
+			}
+			pool.Sort((x, y) => x.manh.CompareTo(y.manh));
+			var hits = 0;
+			for (var p = 0; p < pool.Count && hits < a.MaxAttackTargets; p++)
+			{
+				var j = pool[p].j;
+				var t = _characters[j];
+				if (!t.IsAlive)
+					continue;
+				var th = t.Health;
+				t.Health = Mathf.Max(0, t.Health - a.Attack);
+				if (th > 0 && t.Health <= 0)
+					OnCharacterDied(j);
+				hits++;
+			}
+		}
+	}
+
+	private enum ColonyAttackPoolKind
+	{
+		Colony,
+		Servant,
+		Enemy
+	}
+
+	/// <summary>Colony strikers hit other colonists, <see cref="EnemyCharacter"/>, and (if in range) the <see cref="Servant"/>.</summary>
+	private void StepColonyCharacterCombat()
+	{
+		for (var ai = 0; ai < _characters.Count; ai++)
+		{
+			var a = _characters[ai];
+			if (!a.IsAlive || !a.CanAttack)
+				continue;
+			var r = a.AttackRangeChebyshev;
+			if (r <= 0)
+				continue;
+			var pool = new List<(int manh, ColonyAttackPoolKind kind, int index)>();
+			for (var j = 0; j < _characters.Count; j++)
+			{
+				if (j == ai)
+					continue;
+				var t = _characters[j];
+				if (!t.IsAlive)
+					continue;
+				if (ChebyshevDistance(a.Cell, t.Cell) > r)
+					continue;
+				pool.Add((ManhattanDistance(a.Cell, t.Cell), ColonyAttackPoolKind.Colony, j));
+			}
+			for (var ei = 0; ei < _enemies.Count; ei++)
+			{
+				var e = _enemies[ei];
+				if (!e.IsAlive)
+					continue;
+				if (ChebyshevDistance(a.Cell, e.Cell) > r)
+					continue;
+				pool.Add((ManhattanDistance(a.Cell, e.Cell), ColonyAttackPoolKind.Enemy, ei));
+			}
+			if (ColonyStrikerCanDamageServant(a) && _servant != null && _servant.Health > 0 &&
+			    ChebyshevDistance(a.Cell, _servant.Cell) <= r)
+				pool.Add((ManhattanDistance(a.Cell, _servant.Cell), ColonyAttackPoolKind.Servant, 0));
+			pool.Sort((x, y) => x.manh.CompareTo(y.manh));
+			var hits = 0;
+			for (var p = 0; p < pool.Count && hits < a.MaxAttackTargets; p++)
+			{
+				var item = pool[p];
+				switch (item.kind)
+				{
+					case ColonyAttackPoolKind.Servant:
+						_servant!.Health = Mathf.Max(0, _servant.Health - a.Attack);
+						hits++;
+						break;
+					case ColonyAttackPoolKind.Colony:
+					{
+						var t = _characters[item.index];
+						if (!t.IsAlive)
+							continue;
+						var th = t.Health;
+						t.Health = Mathf.Max(0, t.Health - a.Attack);
+						if (th > 0 && t.Health <= 0)
+							OnCharacterDied(item.index);
+						hits++;
+						break;
+					}
+					case ColonyAttackPoolKind.Enemy:
+					{
+						var e = _enemies[item.index];
+						if (!e.IsAlive)
+							continue;
+						var th = e.Health;
+						e.Health = Mathf.Max(0, e.Health - a.Attack);
+						if (th > 0 && e.Health <= 0)
+							OnEnemyDied(item.index);
+						hits++;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	/// <summary>Only attack-capable colonists (Expert, Soldier) can damage the Servant at range.</summary>
+	private static bool ColonyStrikerCanDamageServant(ColonyCharacter a) => a.CanAttack;
+
+	/// <summary>Chase the closest living <see cref="ColonyCharacter"/> by anchor-cell Manhattan; attack when Chebyshev ≤1 (3×3).</summary>
 	private void StepServant()
 	{
 		if (_servant is not { } servant)
 			return;
+		if (servant.Health <= 0)
+		{
+			_servantPathQueue.Clear();
+			return;
+		}
 		if (_servantRestSecondsRemaining > 0f)
 			return;
 
@@ -952,8 +1342,7 @@ public partial class GridSimulator : Node2D
 			return;
 		}
 
-		var gap = ManhattanBorderGapBetweenRects(GetServantBoardRect(servant), GetColonyCharacterBoardRect(target));
-		if (gap <= ServantAttackRangeCells)
+		if (ChebyshevDistance(servant.Cell, target.Cell) <= 1)
 		{
 			_servantPathQueue.Clear();
 			if (target.IsAlive)
@@ -976,7 +1365,7 @@ public partial class GridSimulator : Node2D
 		if (_servantPathQueue.Count == 0)
 			return;
 
-		_servantMoveBudget += MovementBudgetPerGridMajorStep;
+		_servantMoveBudget += MovementBudgetPerGridMajorStep * (Servant.MajorStepsPerSecond / 2f);
 		var moved = false;
 		while (_servantMoveBudget > 0f)
 		{
@@ -1047,23 +1436,22 @@ public partial class GridSimulator : Node2D
 		return true;
 	}
 
-	/// <summary>Nearest living NPC by L1 border gap between token boards (grid space); ties favor lower list index.</summary>
+	/// <summary>Nearest living NPC by anchor <see cref="ColonyCharacter.Cell"/> Manhattan; ties favor lower list index.</summary>
 	private bool TryGetServantChaseTarget(out ColonyCharacter? target, out int index)
 	{
 		target = null;
 		index = -1;
 		if (_servant is not { } s)
 			return false;
-		var servantR = GetServantBoardRect(s);
 		ColonyCharacter? best = null;
-		var bestD = float.MaxValue;
+		var bestD = int.MaxValue;
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var c = _characters[i];
 			if (!c.IsAlive)
 				continue;
-			var d = ManhattanBorderGapBetweenRects(servantR, GetColonyCharacterBoardRect(c));
-			if (d < bestD)
+			var d = ManhattanDistance(s.Cell, c.Cell);
+			if (d < bestD || d == bestD && (index < 0 || i < index))
 			{
 				bestD = d;
 				best = c;
@@ -1081,17 +1469,14 @@ public partial class GridSimulator : Node2D
 			? FindCivilianFleeDestination(c, c.Cell)
 			: FindRandomValidDestinationCell(c.Cell);
 
+	private Vector2I FindNewDestinationAfterArrivalEnemy(EnemyCharacter e) =>
+		FindRandomValidDestinationCell(e.Cell);
+
 	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
 		Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y);
 
-	/// <summary>Axis-aligned token board in float grid coordinates; same placement as <see cref="DrawCharacter"/> / <see cref="DrawServant"/> (half-open via <see cref="Rect2.End"/>).</summary>
-	private Rect2 GetColonyCharacterBoardRect(ColonyCharacter c)
-	{
-		var w = c.SpriteRows.Length == 0 ? 1 : c.SpriteRows[0].Length;
-		var h = Mathf.Max(1, c.SpriteRows.Length);
-		var pixelScale = Mathf.Max(2, CellSize * 2);
-		return GetTokenBoardRectInGridCells(c.Cell, w, h, c.SpritePivot, pixelScale, CellSize);
-	}
+	private static int ChebyshevDistance(Vector2I a, Vector2I b) =>
+		Mathf.Max(Mathf.Abs(a.X - b.X), Mathf.Abs(a.Y - b.Y));
 
 	/// <summary>Token board AABB for the Servant (includes <see cref="Servant.PixelScaleMultiplierVsCharacter"/>).</summary>
 	/// <param name="anchorCell">Cell grid position for the Servant (same as <see cref="Servant.Cell"/> for current pose).</param>
@@ -1148,25 +1533,7 @@ public partial class GridSimulator : Node2D
 		return new Rect2(xMin, yMin, xMax - xMin, yMax - yMin);
 	}
 
-	/// <summary>L1 distance between the two axis-aligned boards: sum of 1D gaps (0 when rectangles overlap in 2D — including NPC fully inside Servant area).</summary>
-	private static float ManhattanBorderGapBetweenRects(Rect2 a, Rect2 b)
-	{
-		var gx = AxisGapHalfOpen(a.Position.X, a.End.X, b.Position.X, b.End.X);
-		var gy = AxisGapHalfOpen(a.Position.Y, a.End.Y, b.Position.Y, b.End.Y);
-		return gx + gy;
-	}
-
-	/// <summary>Distance between two half-open intervals on the line; 0 if they overlap or touch.</summary>
-	private static float AxisGapHalfOpen(float a0, float a1, float b0, float b1)
-	{
-		if (a1 <= b0)
-			return b0 - a1;
-		if (b1 <= a0)
-			return a0 - b1;
-		return 0f;
-	}
-
-	/// <summary>Attack-capable units (Expert, Soldier) are treated as threats for flee targeting.</summary>
+	/// <summary>Attack-capable units (and the Servant while alive) are treated as threats for flee targeting.</summary>
 	private List<Vector2I> GetEnemyCellsForCivilian(ColonyCharacter self)
 	{
 		var list = new List<Vector2I>();
@@ -1178,8 +1545,14 @@ public partial class GridSimulator : Node2D
 			if (o.CanAttack && o.Health > 0)
 				list.Add(o.Cell);
 		}
-		if (_servant != null)
+		if (_servant != null && _servant.Health > 0)
 			list.Add(_servant.Cell);
+		for (var e = 0; e < _enemies.Count; e++)
+		{
+			var en = _enemies[e];
+			if (en.CanAttack && en.Health > 0)
+				list.Add(en.Cell);
+		}
 		return list;
 	}
 
