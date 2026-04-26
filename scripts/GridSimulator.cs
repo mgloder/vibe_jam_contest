@@ -22,11 +22,13 @@ public partial class GridSimulator : Node2D
 
 	[Export(PropertyHint.Range, "0,1,0.01")]
 	public float TerrainSmoothness { get; set; } = 0.6f;
+	[Export]
+	public bool DrawMajorGridLines { get; set; } = false;
 
-	private Label _statusLabel = null!;
-	private Label _statsLabel = null!;
-	private Control _topPanel = null!;
-	private GridControlPanel _controlPanel = null!;
+	private Label? _statusLabel;
+	private Label? _statsLabel;
+	private Control? _topPanel;
+	private GridControlPanel? _controlPanel;
 	private readonly List<ColonyCharacter> _characters = new();
 	private readonly List<EnemyCharacter> _enemies = new();
 	private readonly List<Queue<Vector2I>> _enemyPathQueues = new();
@@ -77,6 +79,10 @@ public partial class GridSimulator : Node2D
 	public const int MinGridLineStepCells = 10;
 	/// <summary>Seconds between path-movement ticks. Smaller = smoother motion; each tick accrues budget for 4-way steps.</summary>
 	private const float CharacterMoveStepSec = 0.1f;
+	/// <summary>Caps fixed-timestep catch-up so a single engine frame never runs an unbounded number of sim steps (e.g. after focus loss, debugger, or a long hitch).</summary>
+	private const int MaxSimSubstepsPerFrame = 20;
+	/// <summary>Per-unit cap on 4-way path consumption in one sim tick; avoids a tight loop if the queue/path desyncs.</summary>
+	private const int MaxPathConsumeIterationsPerUnit = 2048;
 	/// <summary>
 	/// Budget units added each tick, aligned to the major grid: enough to cross one 10-cell span
 	/// on default-cost terrain in one tick (flat ground uses 1 unit per cell; forest uses 2).
@@ -104,22 +110,28 @@ public partial class GridSimulator : Node2D
 	/// <summary>Pixels per grid cell for drawing and on-screen fit; ≤ <see cref="CellSize"/>, never larger than needed to fit the window.</summary>
 	private float _boardPixelsPerCell = 1f;
 	private Vector2 _boardGridOrigin;
+	private Vector2 _lastLayoutViewportSize = Vector2.Zero;
+	/// <summary>True after the first <see cref="_Process"/>; used to avoid skipping the initial <see cref="QueueRedraw"/> before any sim step.</summary>
+	private bool _processHasRun;
 
 	public override void _Ready()
 	{
 		_rng.Randomize();
-		_statusLabel = GetNode<Label>("%StatusLabel");
-		_statsLabel = GetNode<Label>("%StatsLabel");
-		_topPanel = GetNode<Control>("UI/TopPanel");
-		_controlPanel = GetNode<GridControlPanel>("%ControlPanel");
-		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
-		_controlPanel.BuildingSimulatorRequested += OnOpenBuildingSimulatorPressed;
-		_controlPanel.GenerateTerrainRequested += OnGenerateTerrainPressed;
-		_controlPanel.TerrainRemoveRequested += OnTerrainRemoveRequested;
-		_controlPanel.BuildingExpandSizeChanged += OnBuildingExpandSizeChanged;
-		_controlPanel.TerrainSmoothnessChanged += OnTerrainSmoothnessChanged;
-		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
-		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
+		_statusLabel = GetNodeOrNull<Label>("%StatusLabel");
+		_statsLabel = GetNodeOrNull<Label>("%StatsLabel");
+		_topPanel = GetNodeOrNull<Control>("UI/TopPanel");
+		_controlPanel = GetNodeOrNull<GridControlPanel>("%ControlPanel");
+		if (_controlPanel != null)
+		{
+			_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
+			_controlPanel.BuildingSimulatorRequested += OnOpenBuildingSimulatorPressed;
+			_controlPanel.GenerateTerrainRequested += OnGenerateTerrainPressed;
+			_controlPanel.TerrainRemoveRequested += OnTerrainRemoveRequested;
+			_controlPanel.BuildingExpandSizeChanged += OnBuildingExpandSizeChanged;
+			_controlPanel.TerrainSmoothnessChanged += OnTerrainSmoothnessChanged;
+			_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
+			_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
+		}
 
 		// Ensure the simulator node processes even if parent/owner toggles process mode.
 		SetProcess(true);
@@ -142,7 +154,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
-		PlaceServant();
+		// Scene starts without a Servant; use PlaceServant() from gameplay or terrain tools when you add that flow.
 		EnsureCharacterDestinationsAreValid();
 		EnsureEnemyDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
@@ -152,10 +164,12 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
-		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
-		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
+		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
+		_controlPanel?.SetTerrainSmoothness(TerrainSmoothness);
 		UpdateBoardLayout();
+		_lastLayoutViewportSize = GetViewport().GetVisibleRect().Size;
 		UpdateHud();
+		QueueRedraw();
 	}
 
 	public override void _UnhandledInput(InputEvent @event)
@@ -166,8 +180,9 @@ public partial class GridSimulator : Node2D
 		// Keep a minimal reset hotkey while the project is still scaffolding.
 		if (key.Keycode == Key.R)
 		{
-			QueueRedraw();
+			UpdateBoardLayout();
 			UpdateHud();
+			QueueRedraw();
 			GetViewport().SetInputAsHandled();
 		}
 	}
@@ -180,11 +195,25 @@ public partial class GridSimulator : Node2D
 		for (var ei = 0; ei < _enemies.Count; ei++)
 			_enemyRestSecondsRemaining[ei] = Mathf.Max(0f, _enemyRestSecondsRemaining[ei] - d);
 
+		// One layout pass per frame (was duplicated inside <see cref="UpdateHud"/> every call).
+		UpdateBoardLayout();
 		_characterMoveAccumulatorSec += d;
+		// Prevent spiral-of-death: a huge delta in one frame must not run thousands of sim ticks in a single _Process.
+		_characterMoveAccumulatorSec = Mathf.Min(
+			_characterMoveAccumulatorSec,
+			CharacterMoveStepSec * MaxSimSubstepsPerFrame);
+
 		if (_characterMoveAccumulatorSec < CharacterMoveStepSec)
 		{
 			UpdateHud();
-			QueueRedraw();
+			// No sim step: board pixels are static — avoid 60 full redraws/sec unless the window or HUD changed.
+			var v = GetViewport().GetVisibleRect().Size;
+			if (!_processHasRun || v != _lastLayoutViewportSize)
+			{
+				_lastLayoutViewportSize = v;
+				QueueRedraw();
+			}
+			_processHasRun = true;
 			return;
 		}
 
@@ -194,6 +223,8 @@ public partial class GridSimulator : Node2D
 			StepCharactersTowardDestination();
 		}
 
+		_lastLayoutViewportSize = GetViewport().GetVisibleRect().Size;
+		_processHasRun = true;
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -214,18 +245,20 @@ public partial class GridSimulator : Node2D
 
 		DrawBuildingSprites(origin);
 
-		var gridStep = Mathf.Max(MinGridLineStepCells, 1);
-		var lineColor = new Color(0.28f, 0.28f, 0.30f, 0.78f);
-		for (var x = 0; x <= GridWidth; x += gridStep)
+		if (DrawMajorGridLines)
 		{
-			var xPos = origin.X + x * s;
-			DrawLine(new Vector2(xPos, origin.Y), new Vector2(xPos, origin.Y + boardSize.Y), lineColor, 1f);
-		}
-
-		for (var y = 0; y <= GridHeight; y += gridStep)
-		{
-			var yPos = origin.Y + y * s;
-			DrawLine(new Vector2(origin.X, yPos), new Vector2(origin.X + boardSize.X, yPos), lineColor, 1f);
+			var gridStep = Mathf.Max(MinGridLineStepCells, 1);
+			var lineColor = new Color(0.28f, 0.28f, 0.30f, 0.78f);
+			for (var x = 0; x <= GridWidth; x += gridStep)
+			{
+				var xPos = origin.X + x * s;
+				DrawLine(new Vector2(xPos, origin.Y), new Vector2(xPos, origin.Y + boardSize.Y), lineColor, 1f);
+			}
+			for (var y = 0; y <= GridHeight; y += gridStep)
+			{
+				var yPos = origin.Y + y * s;
+				DrawLine(new Vector2(origin.X, yPos), new Vector2(origin.X + boardSize.X, yPos), lineColor, 1f);
+			}
 		}
 
 		if (_isCharacterVisible)
@@ -437,26 +470,32 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Keeps the full <see cref="GridWidth"/>×<see cref="GridHeight"/> sim visible in the area left of the control panel, capped by <see cref="CellSize"/>; also caches <see cref="_boardGridOrigin"/> for drawing.</summary>
+	/// <summary>Keeps the full <see cref="GridWidth"/>×<see cref="GridHeight"/> sim visible, capped by <see cref="CellSize"/>; reserves space on the right only when a <see cref="GridControlPanel"/> is present.</summary>
 	private void UpdateBoardLayout()
 	{
 		var v = GetViewport().GetVisibleRect().Size;
 		if (v.X < 2f || v.Y < 2f)
 		{
 			_boardPixelsPerCell = Mathf.Max(1f, CellSize);
-			_boardGridOrigin = new Vector2(16f, 74f);
+			_boardGridOrigin = new Vector2(16f, 16f);
 			return;
 		}
-		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
-		if (panelLeftX < 4f)
-			panelLeftX = v.X - 240f;
+		float panelLeftX;
+		if (_controlPanel != null)
+		{
+			panelLeftX = _controlPanel.GetGlobalRect().Position.X;
+			if (panelLeftX < 4f)
+				panelLeftX = v.X - 240f;
+		}
+		else
+			panelLeftX = v.X;
 		var leftPadding = 16f;
 		var rightPadding = 12f;
 		var availableWidth = panelLeftX - rightPadding - leftPadding;
-		var topPanelBottom = _topPanel.GetGlobalRect().End.Y;
+		var topPanelBottom = _topPanel?.GetGlobalRect().End.Y ?? 0f;
 		if (topPanelBottom < 1f)
-			topPanelBottom = 74f;
-		var topPadding = 10f;
+			topPanelBottom = 0f;
+		var topPadding = 16f;
 		var bottomPadding = 16f;
 		var topBound = topPanelBottom + topPadding;
 		var availableHeight = v.Y - topBound - bottomPadding;
@@ -495,61 +534,67 @@ public partial class GridSimulator : Node2D
 			_terrainBoardTexture.Update(_terrainBoardImage);
 	}
 
+	/// <summary>Updates on-screen text and control panel. Call <see cref="UpdateBoardLayout"/> once per frame first (e.g. from <see cref="_Process"/> or before this from UI callbacks).</summary>
 	private void UpdateHud()
 	{
-		UpdateBoardLayout();
-		var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
-		var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
-		_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
-		var visibility = _isCharacterVisible ? "Shown" : "Removed";
-		var civilianCount = 0;
-		var expertCount = 0;
-		var soldierCount = 0;
-		ColonyCharacter? profileC = null, profileE = null, profileS = null;
-		for (var i = 0; i < _characters.Count; i++)
+		if (_statusLabel != null)
 		{
-			switch (_characters[i].Type)
-			{
-				case ColonyCharacterType.Civilian:
-					civilianCount++;
-					profileC ??= _characters[i];
-					break;
-				case ColonyCharacterType.Expert:
-					expertCount++;
-					profileE ??= _characters[i];
-					break;
-				case ColonyCharacterType.Soldier:
-					soldierCount++;
-					profileS ??= _characters[i];
-					break;
-			}
+			var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
+			var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
+			_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
 		}
-		var crazyCount = 0;
-		var monsterCount = 0;
-		EnemyCharacter? profileCr = null, profileM = null;
-		for (var i = 0; i < _enemies.Count; i++)
+		if (_statsLabel != null)
 		{
-			if (_enemies[i].Type == EnemyType.Crazy)
+			var visibility = _isCharacterVisible ? "Shown" : "Removed";
+			var civilianCount = 0;
+			var expertCount = 0;
+			var soldierCount = 0;
+			ColonyCharacter? profileC = null, profileE = null, profileS = null;
+			for (var i = 0; i < _characters.Count; i++)
 			{
-				crazyCount++;
-				profileCr ??= _enemies[i];
+				switch (_characters[i].Type)
+				{
+					case ColonyCharacterType.Civilian:
+						civilianCount++;
+						profileC ??= _characters[i];
+						break;
+					case ColonyCharacterType.Expert:
+						expertCount++;
+						profileE ??= _characters[i];
+						break;
+					case ColonyCharacterType.Soldier:
+						soldierCount++;
+						profileS ??= _characters[i];
+						break;
+				}
 			}
-			else if (_enemies[i].Type == EnemyType.Monster)
+			var crazyCount = 0;
+			var monsterCount = 0;
+			EnemyCharacter? profileCr = null, profileM = null;
+			for (var i = 0; i < _enemies.Count; i++)
 			{
-				monsterCount++;
-				profileM ??= _enemies[i];
+				if (_enemies[i].Type == EnemyType.Crazy)
+				{
+					crazyCount++;
+					profileCr ??= _enemies[i];
+				}
+				else if (_enemies[i].Type == EnemyType.Monster)
+				{
+					monsterCount++;
+					profileM ??= _enemies[i];
+				}
 			}
+			var civStr = profileC != null ? $"{profileC.MaxHealth}HP/{profileC.Attack}atk" : "1/0";
+			var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "6/3";
+			var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
+			var crStr = profileCr != null ? $"{profileCr.MaxHealth}HP/{profileCr.Attack}atk" : "2/1";
+			var mStr = profileM != null ? $"{profileM.MaxHealth}HP/{profileM.Attack}atk" : "3/2";
+			var drawW = GridWidth * _boardPixelsPerCell;
+			var drawH = GridHeight * _boardPixelsPerCell;
+			_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight} sim → {drawW:0.#}x{drawH:0.#} px display ({_boardPixelsPerCell:0.##} px/cell, cap {CellSize})  |  Colony: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  Enemies: {_enemies.Count} (Cr:{crazyCount} M:{monsterCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  Cr {crStr}  M {mStr}  |  NPC State: {visibility}";
 		}
-		var civStr = profileC != null ? $"{profileC.MaxHealth}HP/{profileC.Attack}atk" : "1/0";
-		var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "6/3";
-		var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
-		var crStr = profileCr != null ? $"{profileCr.MaxHealth}HP/{profileCr.Attack}atk" : "2/1";
-		var mStr = profileM != null ? $"{profileM.MaxHealth}HP/{profileM.Attack}atk" : "3/2";
-		var drawW = GridWidth * _boardPixelsPerCell;
-		var drawH = GridHeight * _boardPixelsPerCell;
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight} sim → {drawW:0.#}x{drawH:0.#} px display ({_boardPixelsPerCell:0.##} px/cell, cap {CellSize})  |  Colony: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  Enemies: {_enemies.Count} (Cr:{crazyCount} M:{monsterCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  Cr {crStr}  M {mStr}  |  NPC State: {visibility}";
-		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
-		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
+		_controlPanel?.SetCharacterVisibilityState(_isCharacterVisible);
+		_controlPanel?.SetCharacterRandomizeEnabled(_isCharacterVisible);
 	}
 
 	private void OnRandomizeCharacterPressed()
@@ -571,6 +616,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(ri);
 		for (var re = 0; re < _enemies.Count; re++)
 			TryReplanEnemyPathWithDestinationFallback(re);
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -587,6 +633,7 @@ public partial class GridSimulator : Node2D
 			_buildingGrowthTimer.Stop();
 		}
 
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -594,7 +641,8 @@ public partial class GridSimulator : Node2D
 	private void OnBuildingExpandSizeChanged(int delta)
 	{
 		BuildingGrowthPerTick = Mathf.Clamp(BuildingGrowthPerTick + delta, 1, 64);
-		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
+		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
+		UpdateBoardLayout();
 		UpdateHud();
 	}
 
@@ -617,6 +665,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -644,6 +693,7 @@ public partial class GridSimulator : Node2D
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
 		EnsureServantOnWalkable();
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -651,7 +701,7 @@ public partial class GridSimulator : Node2D
 	private void OnTerrainSmoothnessChanged(float value)
 	{
 		TerrainSmoothness = Mathf.Clamp(value, 0f, 1f);
-		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
+		_controlPanel?.SetTerrainSmoothness(TerrainSmoothness);
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		RefreshTerrainBoardTexture();
@@ -670,6 +720,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -677,6 +728,7 @@ public partial class GridSimulator : Node2D
 	private void OnShowCharacterPressed()
 	{
 		_isCharacterVisible = true;
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -684,6 +736,7 @@ public partial class GridSimulator : Node2D
 	private void OnRemoveCharacterPressed()
 	{
 		_isCharacterVisible = false;
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -706,6 +759,7 @@ public partial class GridSimulator : Node2D
 			_lastCompletedBuildingOrigin = _activeBuildingOrigin;
 		}
 
+		UpdateBoardLayout();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -871,15 +925,10 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
+	/// <summary>Initial load: no hostiles. Spawn enemies later from gameplay / editor if you add that flow.</summary>
 	private void InitializeStartingEnemies()
 	{
 		_enemies.Clear();
-		var crCell = FindRandomValidDestinationCell();
-		_enemies.Add(EnemyCharacter.CreateByType(EnemyType.Crazy, crCell, "Crazy 1", null));
-		var moCell = FindRandomValidDestinationCell(crCell);
-		_enemies.Add(EnemyCharacter.CreateByType(EnemyType.Monster, moCell, "Monster 1", null));
-		for (var j = 0; j < _enemies.Count; j++)
-			_enemies[j].Destination = FindRandomValidDestinationCell(_enemies[j].Cell);
 	}
 
 	private List<Vector2I> BuildSpawnCells(Vector2I center, int count, int spacing)
@@ -1205,8 +1254,10 @@ public partial class GridSimulator : Node2D
 
 			_characterMoveBudget[i] += MovementBudgetPerGridMajorStep * (character.MajorStepsPerSecond / 2f);
 			var moved = false;
-			while (_characterMoveBudget[i] > 0f)
+			var consumeIters = 0;
+			while (_characterMoveBudget[i] > 0f && consumeIters < MaxPathConsumeIterationsPerUnit)
 			{
+				consumeIters++;
 				if (pathQueue.Count == 0)
 				{
 					if (!ReplanCharacterPath(i))
@@ -1247,6 +1298,8 @@ public partial class GridSimulator : Node2D
 				}
 
 				var cost = (float)GetPathMoveCost(next);
+				if (cost <= 0f)
+					break;
 				if (_characterMoveBudget[i] < cost)
 					break;
 
@@ -1289,8 +1342,10 @@ public partial class GridSimulator : Node2D
 
 			_enemyMoveBudget[ei] += MovementBudgetPerGridMajorStep * (e.MajorStepsPerSecond / 2f);
 			var movedEnemy = false;
-			while (_enemyMoveBudget[ei] > 0f)
+			var enemyConsumeIters = 0;
+			while (_enemyMoveBudget[ei] > 0f && enemyConsumeIters < MaxPathConsumeIterationsPerUnit)
 			{
+				enemyConsumeIters++;
 				if (pathQueue.Count == 0)
 				{
 					if (!ReplanEnemyPath(ei))
@@ -1315,6 +1370,8 @@ public partial class GridSimulator : Node2D
 					continue;
 				}
 				var costE = (float)GetPathMoveCost(next);
+				if (costE <= 0f)
+					break;
 				if (_enemyMoveBudget[ei] < costE)
 					break;
 				_enemyMoveBudget[ei] -= costE;
@@ -1478,8 +1535,10 @@ public partial class GridSimulator : Node2D
 
 		_servantMoveBudget += MovementBudgetPerGridMajorStep * (Servant.MajorStepsPerSecond / 2f);
 		var moved = false;
-		while (_servantMoveBudget > 0f)
+		var servantConsumeIters = 0;
+		while (_servantMoveBudget > 0f && servantConsumeIters < MaxPathConsumeIterationsPerUnit)
 		{
+			servantConsumeIters++;
 			if (_servantPathQueue.Count == 0)
 			{
 				if (!ReplanServantPath(target.Cell))
@@ -1507,6 +1566,8 @@ public partial class GridSimulator : Node2D
 			}
 
 			var cost = (float)GetPathMoveCost(next);
+			if (cost <= 0f)
+				break;
 			if (_servantMoveBudget < cost)
 				break;
 

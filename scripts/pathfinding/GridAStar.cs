@@ -33,9 +33,14 @@ public static class GridAStar
 		open.Enqueue(start, Heuristic(start, goal));
 
 		var dirs = new[] { Vector2I.Left, Vector2I.Right, Vector2I.Up, Vector2I.Down };
-
+		// Stale f-score entries stay in the queue; on large grids the dequeue count can far exceed
+		// width*height. Hard cap prevents multi-second main-thread stalls.
+		var maxDequeueOps = System.Math.Max(width * height * 4, 150_000);
+		var dequeues = 0;
 		while (open.Count > 0)
 		{
+			if (dequeues++ > maxDequeueOps)
+				return null;
 			open.TryDequeue(out var current, out _);
 			if (closed.Contains(current))
 				continue;
