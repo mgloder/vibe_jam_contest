@@ -27,6 +27,7 @@ public partial class GridSimulator : Node2D
 	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private readonly List<ColonyCharacter> _characters = new();
+	private Servant? _servant;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
@@ -85,6 +86,7 @@ public partial class GridSimulator : Node2D
 		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
@@ -169,6 +171,8 @@ public partial class GridSimulator : Node2D
 				DrawCharacterDestination(_characters[i], origin);
 				DrawCharacter(_characters[i], origin);
 			}
+			if (_servant != null)
+				DrawServant(_servant, origin);
 		}
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
 	}
@@ -210,6 +214,33 @@ public partial class GridSimulator : Node2D
 		}
 
 		DrawNpcTool(character, cellTopLeft, pixelScale);
+	}
+
+	/// <summary>Same token/sprite path as <see cref="DrawCharacter"/>, with per-token size scaled by <see cref="Servant.PixelScaleMultiplierVsCharacter"/>.</summary>
+	private void DrawServant(Servant servant, Vector2 gridOrigin)
+	{
+		var cellTopLeft = gridOrigin + new Vector2(servant.Cell.X * CellSize, servant.Cell.Y * CellSize);
+		var basePixel = Mathf.Max(2, CellSize * 2);
+		var pixelScale = basePixel * Servant.PixelScaleMultiplierVsCharacter;
+
+		for (var y = 0; y < servant.SpriteRows.Length; y++)
+		{
+			var row = servant.SpriteRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				var token = row[x];
+				if (token == '.')
+					continue;
+				if (!servant.Palette.TryGetValue(token, out var color))
+					continue;
+
+				var px = cellTopLeft + new Vector2(
+					(x - servant.SpritePivot.X) * pixelScale,
+					(y - servant.SpritePivot.Y) * pixelScale
+				);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
 	}
 
 	private void DrawNpcTool(ColonyCharacter character, Vector2 cellTopLeft, float pixelScale)
@@ -327,6 +358,7 @@ public partial class GridSimulator : Node2D
 		RelocateCharactersToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
@@ -351,6 +383,7 @@ public partial class GridSimulator : Node2D
 		EnsurePathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
+		EnsureServantOnWalkable();
 		QueueRedraw();
 	}
 
@@ -363,6 +396,7 @@ public partial class GridSimulator : Node2D
 		RelocateCharactersToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
+		PlaceServant();
 		EnsureCharacterDestinationsAreValid();
 		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
@@ -581,6 +615,25 @@ public partial class GridSimulator : Node2D
 
 			character.Cell = FindNearestWalkableCell(character.Cell);
 		}
+	}
+
+	/// <summary>Spawn/refresh the Cthulhu token sprite east of map center, snapped to a walkable cell (after buildings exist).</summary>
+	private void PlaceServant()
+	{
+		var center = new Vector2I(GridWidth / 2, GridHeight / 2);
+		var preferred = new Vector2I(
+			Mathf.Clamp(center.X + 64, 0, GridWidth - 1),
+			Mathf.Clamp(center.Y + 32, 0, GridHeight - 1)
+		);
+		_servant = Servant.CreateAt(FindNearestWalkableCell(preferred));
+	}
+
+	private void EnsureServantOnWalkable()
+	{
+		if (_servant == null)
+			return;
+		if (!IsWalkableCharacterCell(_servant.Cell))
+			_servant.Cell = FindNearestWalkableCell(_servant.Cell);
 	}
 
 	private void EnsureCharacterDestinationsAreValid()
