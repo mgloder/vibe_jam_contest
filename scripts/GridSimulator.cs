@@ -11,6 +11,7 @@ public partial class GridSimulator : Node2D
 	[Export]
 	public int GridHeight { get; set; } = 540;
 
+	/// <summary>Maximum pixels per simulation cell (when the window is large). The board is scaled down to fit the visible area to the left of the control panel.</summary>
 	[Export]
 	public int CellSize { get; set; } = 2;
 
@@ -81,6 +82,8 @@ public partial class GridSimulator : Node2D
 	};
 
 	private float _servantRestSecondsRemaining;
+	/// <summary>Pixels per grid cell for drawing and on-screen fit; ≤ <see cref="CellSize"/>, never larger than needed to fit the window.</summary>
+	private float _boardPixelsPerCell = 1f;
 
 	public override void _Ready()
 	{
@@ -128,6 +131,7 @@ public partial class GridSimulator : Node2D
 			TryReplanEnemyPathWithDestinationFallback(pe);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
+		UpdateBoardDisplayMetrics();
 		UpdateHud();
 	}
 
@@ -147,6 +151,7 @@ public partial class GridSimulator : Node2D
 
 	public override void _Process(double delta)
 	{
+		UpdateBoardDisplayMetrics();
 		var d = (float)delta;
 		_servantRestSecondsRemaining = Mathf.Max(0f, _servantRestSecondsRemaining - d);
 
@@ -170,22 +175,24 @@ public partial class GridSimulator : Node2D
 
 	public override void _Draw()
 	{
+		UpdateBoardDisplayMetrics();
+		var s = _boardPixelsPerCell;
 		var origin = GetGridOrigin();
-		var boardSize = new Vector2(GridWidth * CellSize, GridHeight * CellSize);
+		var boardSize = new Vector2(GridWidth * s, GridHeight * s);
 
 		// Retro-style base board with hard-edged palette blocks.
 		DrawRect(new Rect2(origin, boardSize), new Color(0.07f, 0.08f, 0.12f));
 
 		// Keep tiles exactly on grid boundaries.
 		var cellPad = 0f;
-		var cellSize = new Vector2(CellSize - cellPad * 2f, CellSize - cellPad * 2f);
+		var cellSizeVec = new Vector2(s - cellPad * 2f, s - cellPad * 2f);
 		for (var y = 0; y < GridHeight; y++)
 		{
 			for (var x = 0; x < GridWidth; x++)
 			{
-				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
+				var px = origin + new Vector2(x * s + cellPad, y * s + cellPad);
 				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
-				DrawRect(new Rect2(px, cellSize), color);
+				DrawRect(new Rect2(px, cellSizeVec), color);
 			}
 		}
 
@@ -195,13 +202,13 @@ public partial class GridSimulator : Node2D
 		var lineColor = new Color(0.28f, 0.28f, 0.30f, 0.78f);
 		for (var x = 0; x <= GridWidth; x += gridStep)
 		{
-			var xPos = origin.X + x * CellSize;
+			var xPos = origin.X + x * s;
 			DrawLine(new Vector2(xPos, origin.Y), new Vector2(xPos, origin.Y + boardSize.Y), lineColor, 1f);
 		}
 
 		for (var y = 0; y <= GridHeight; y += gridStep)
 		{
-			var yPos = origin.Y + y * CellSize;
+			var yPos = origin.Y + y * s;
 			DrawLine(new Vector2(origin.X, yPos), new Vector2(origin.X + boardSize.X, yPos), lineColor, 1f);
 		}
 
@@ -233,8 +240,9 @@ public partial class GridSimulator : Node2D
 
 	private void DrawUnitDestinationRect(Vector2I destination, Vector2 gridOrigin, Color color)
 	{
-		var markerTopLeft = gridOrigin + new Vector2(destination.X * CellSize, destination.Y * CellSize);
-		var markerSize = Mathf.Max(1f, CellSize);
+		var s = _boardPixelsPerCell;
+		var markerTopLeft = gridOrigin + new Vector2(destination.X * s, destination.Y * s);
+		var markerSize = Mathf.Max(1f, s);
 		var inset = markerSize <= 2f ? 0f : 1f;
 		var rect = new Rect2(
 			markerTopLeft + new Vector2(inset, inset),
@@ -245,8 +253,9 @@ public partial class GridSimulator : Node2D
 
 	private void DrawCharacter(ColonyCharacter character, Vector2 gridOrigin)
 	{
-		var cellTopLeft = gridOrigin + new Vector2(character.Cell.X * CellSize, character.Cell.Y * CellSize);
-		var pixelScale = Mathf.Max(2, CellSize * 2);
+		var s = _boardPixelsPerCell;
+		var cellTopLeft = gridOrigin + new Vector2(character.Cell.X * s, character.Cell.Y * s);
+		var pixelScale = Mathf.Max(2, s * 2);
 
 		if (character.Health <= 0)
 		{
@@ -278,8 +287,9 @@ public partial class GridSimulator : Node2D
 
 	private void DrawEnemy(EnemyCharacter e, Vector2 gridOrigin)
 	{
-		var cellTopLeft = gridOrigin + new Vector2(e.Cell.X * CellSize, e.Cell.Y * CellSize);
-		var pixelScale = Mathf.Max(2, CellSize * 2);
+		var s = _boardPixelsPerCell;
+		var cellTopLeft = gridOrigin + new Vector2(e.Cell.X * s, e.Cell.Y * s);
+		var pixelScale = Mathf.Max(2, s * 2);
 		if (e.Health <= 0)
 		{
 			DrawLayingDownCharacter(cellTopLeft, pixelScale);
@@ -332,8 +342,9 @@ public partial class GridSimulator : Node2D
 	/// <summary>Same token/sprite path as <see cref="DrawCharacter"/>, with per-token size scaled by <see cref="Servant.PixelScaleMultiplierVsCharacter"/>.</summary>
 	private void DrawServant(Servant servant, Vector2 gridOrigin, bool drawDead)
 	{
-		var cellTopLeft = gridOrigin + new Vector2(servant.Cell.X * CellSize, servant.Cell.Y * CellSize);
-		var basePixel = Mathf.Max(2, CellSize * 2);
+		var s = _boardPixelsPerCell;
+		var cellTopLeft = gridOrigin + new Vector2(servant.Cell.X * s, servant.Cell.Y * s);
+		var basePixel = Mathf.Max(2, s * 2);
 		if (drawDead)
 		{
 			DrawLayingDownCharacter(cellTopLeft, basePixel);
@@ -410,14 +421,43 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
+	/// <summary>Keeps the full <see cref="GridWidth"/>×<see cref="GridHeight"/> sim visible in the area left of the control panel, capped by <see cref="CellSize"/>.</summary>
+	private void UpdateBoardDisplayMetrics()
+	{
+		var v = GetViewport().GetVisibleRect().Size;
+		if (v.X < 2f || v.Y < 2f)
+		{
+			_boardPixelsPerCell = Mathf.Max(1f, CellSize);
+			return;
+		}
+		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
+		if (panelLeftX < 4f)
+			panelLeftX = v.X - 240f;
+		var leftPadding = 16f;
+		var rightPadding = 12f;
+		var availableWidth = panelLeftX - rightPadding - leftPadding;
+		var topPanelBottom = _topPanel.GetGlobalRect().End.Y;
+		if (topPanelBottom < 1f)
+			topPanelBottom = 74f;
+		var topPadding = 10f;
+		var bottomPadding = 16f;
+		var topBound = topPanelBottom + topPadding;
+		var availableHeight = v.Y - topBound - bottomPadding;
+		var fitW = availableWidth / Mathf.Max(1, GridWidth);
+		var fitH = availableHeight / Mathf.Max(1, GridHeight);
+		_boardPixelsPerCell = Mathf.Max(1f, Mathf.Min((float)CellSize, Mathf.Min(fitW, fitH)));
+	}
+
 	private Vector2 GetGridOrigin()
 	{
-		var viewport = GetViewportRect().Size;
-		var boardWidth = GridWidth * CellSize;
-		var boardHeight = GridHeight * CellSize;
+		var s = _boardPixelsPerCell;
+		var boardWidth = GridWidth * s;
+		var boardHeight = GridHeight * s;
 
 		// Reserve space for the right-side control panel so the board never renders underneath it.
 		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
+		if (panelLeftX < 4f)
+			panelLeftX = GetViewport().GetVisibleRect().Size.X - 240f;
 		var leftPadding = 16f;
 		var rightPadding = 12f;
 		var availableWidth = panelLeftX - rightPadding - leftPadding;
@@ -426,10 +466,13 @@ public partial class GridSimulator : Node2D
 
 		// Reserve space for the top info panel.
 		var topPanelBottom = _topPanel.GetGlobalRect().End.Y;
+		if (topPanelBottom < 1f)
+			topPanelBottom = 74f;
 		var topPadding = 10f;
 		var bottomPadding = 16f;
 		var topBound = topPanelBottom + topPadding;
-		var availableHeight = viewport.Y - topBound - bottomPadding;
+		var vh = GetViewport().GetVisibleRect().Size.Y;
+		var availableHeight = vh - topBound - bottomPadding;
 		var y = Mathf.Floor(topBound + (availableHeight - boardHeight) * 0.5f);
 		y = Mathf.Max(topBound, y);
 
@@ -438,6 +481,7 @@ public partial class GridSimulator : Node2D
 
 	private void UpdateHud()
 	{
+		UpdateBoardDisplayMetrics();
 		var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
 		var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
 		_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
@@ -457,7 +501,9 @@ public partial class GridSimulator : Node2D
 		var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
 		var crStr = profileCr != null ? $"{profileCr.MaxHealth}HP/{profileCr.Attack}atk" : "2/1";
 		var mStr = profileM != null ? $"{profileM.MaxHealth}HP/{profileM.Attack}atk" : "3/2";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  Colony: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  Enemies: {_enemies.Count} (Cr:{crazyCount} M:{monsterCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  Cr {crStr}  M {mStr}  |  NPC State: {visibility}";
+		var drawW = GridWidth * _boardPixelsPerCell;
+		var drawH = GridHeight * _boardPixelsPerCell;
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight} sim → {drawW:0.#}x{drawH:0.#} px display ({_boardPixelsPerCell:0.##} px/cell, cap {CellSize})  |  Colony: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  Enemies: {_enemies.Count} (Cr:{crazyCount} M:{monsterCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  Cr {crStr}  M {mStr}  |  NPC State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
 	}
@@ -636,11 +682,12 @@ public partial class GridSimulator : Node2D
 		if (_buildingTexture == null)
 			return;
 
+		var s = _boardPixelsPerCell;
 		for (var i = 0; i < _buildingFootprints.Count; i++)
 		{
 			var footprint = _buildingFootprints[i];
-			var topLeft = gridOrigin + new Vector2(footprint.Position.X * CellSize, footprint.Position.Y * CellSize);
-			var drawSize = new Vector2(footprint.Size.X * CellSize, footprint.Size.Y * CellSize);
+			var topLeft = gridOrigin + new Vector2(footprint.Position.X * s, footprint.Position.Y * s);
+			var drawSize = new Vector2(footprint.Size.X * s, footprint.Size.Y * s);
 			DrawTextureRect(_buildingTexture, new Rect2(topLeft, drawSize), false);
 		}
 	}
@@ -1484,9 +1531,10 @@ public partial class GridSimulator : Node2D
 	{
 		var w = s.SpriteRows.Length == 0 ? 1 : s.SpriteRows[0].Length;
 		var h = Mathf.Max(1, s.SpriteRows.Length);
-		var basePixel = Mathf.Max(2, CellSize * 2);
+		var px = _boardPixelsPerCell;
+		var basePixel = Mathf.Max(2, px * 2);
 		var pixelScale = basePixel * Servant.PixelScaleMultiplierVsCharacter;
-		return GetTokenBoardRectInGridCells(anchorCell, w, h, s.SpritePivot, pixelScale, CellSize);
+		return GetTokenBoardRectInGridCells(anchorCell, w, h, s.SpritePivot, pixelScale, px);
 	}
 
 	private Rect2 GetServantBoardRect(Servant s) => GetServantBoardRectForAnchor(s, s.Cell);
@@ -1519,9 +1567,9 @@ public partial class GridSimulator : Node2D
 		_servant != null && IsWalkableForServantAnchorCell(_servant, anchorCell);
 
 	private static Rect2 GetTokenBoardRectInGridCells(
-		Vector2I cell, int spriteW, int spriteH, Vector2I pivot, float pixelScale, int cellSize)
+		Vector2I cell, int spriteW, int spriteH, Vector2I pivot, float pixelScale, float cellPixelSize)
 	{
-		var cs = Mathf.Max(1, cellSize);
+		var cs = Mathf.Max(1f, cellPixelSize);
 		var leftX = (0f - pivot.X) * pixelScale;
 		var rightX = (spriteW - pivot.X) * pixelScale;
 		var topY = (0f - pivot.Y) * pixelScale;

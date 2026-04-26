@@ -11,9 +11,9 @@ A **Godot 4.6** pixel-grid game foundation using **C#** (`.NET 8`, `Godot.NET.Sd
 | Item | Value |
 |------|--------|
 | Godot | 4.6 (`config/features` includes `"4.6"`) |
-| Language | C# (`[dotnet]` section; assembly name `"New Game Project"`) |
+| Language | C# (`[dotnet]` section; assembly `EdgeOfChaos`) — display name 混沌边缘 (Edge of Chaos) |
 | Target framework | `net8.0` (Android build path uses `net9.0`) |
-| Root namespace | `NewGameProject` |
+| Root namespace | `EdgeOfChaos` |
 | Rendering | Forward Plus |
 | 3D physics | Jolt (project default) |
 | Windows rendering device | D3D12 |
@@ -24,7 +24,7 @@ A **Godot 4.6** pixel-grid game foundation using **C#** (`.NET 8`, `Godot.NET.Sd
 | Path | Role |
 |------|------|
 | `project.godot` | Project config; `run/main_scene` = `res://scenes/welcome.tscn` |
-| `New Game Project.csproj` / `New Game Project.sln` | C# build |
+| `EdgeOfChaos.csproj` / `EdgeOfChaos.sln` | C# build |
 | `scenes/welcome.tscn` | Welcome/menu shell for launching the simulation |
 | `scripts/WelcomeScreen.cs` | Start button → `ChangeSceneToFile` (default `res://scenes/grid_simulator.tscn`; export `NextScenePath`) |
 | `scenes/grid_simulator.tscn` | Main simulation scene with HUD, timer, and controls help |
