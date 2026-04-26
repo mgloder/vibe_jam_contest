@@ -2168,6 +2168,7 @@ public partial class GridSimulator : Node2D
 			}
 			pool.Sort((x, y) => x.manh.CompareTo(y.manh));
 			var hits = 0;
+			Vector2I? firstStrikeCell = null;
 			for (var p = 0; p < pool.Count && hits < a.MaxAttackTargets; p++)
 			{
 				var item = pool[p];
@@ -2184,6 +2185,8 @@ public partial class GridSimulator : Node2D
 						sv.Health = Mathf.Max(0, sv.Health - a.Attack);
 						if (th > 0 && sv.Health <= 0)
 							_servantDeathSfx?.Play();
+						if (firstStrikeCell == null)
+							firstStrikeCell = sv.Cell;
 						hits++;
 						break;
 					}
@@ -2196,6 +2199,8 @@ public partial class GridSimulator : Node2D
 						e.Health = Mathf.Max(0, e.Health - a.Attack);
 						if (th > 0 && e.Health <= 0)
 							OnEnemyDied(item.index);
+						if (firstStrikeCell == null)
+							firstStrikeCell = e.Cell;
 						hits++;
 						break;
 					}
@@ -2204,7 +2209,15 @@ public partial class GridSimulator : Node2D
 			if (hits > 0)
 			{
 				if (a.Type is ColonyCharacterType.Expert or ColonyCharacterType.Soldier)
+				{
 					_colonyStrikerGunshotSfx?.Play();
+					if (firstStrikeCell.HasValue)
+					{
+						var gfx = new StrikerGunfireVfx();
+						AddChild(gfx);
+						gfx.Begin(this, a.Cell, firstStrikeCell.Value);
+					}
+				}
 				_characterRestSecondsRemaining[ai] = PostAttackStopSec;
 			}
 		}
