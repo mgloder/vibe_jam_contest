@@ -123,6 +123,7 @@ public partial class GridSimulator : Node2D
 	private const int ServantCardCurrencyCost = 6;
 	private const string GameOverScenePath = "res://scenes/game_over.tscn";
 	private const string WinGameScenePath = "res://scenes/win_game.tscn";
+	private const string ServantKillRoarSfxPath = "res://scenes/music/monster_roars.mp3";
 	/// <summary>True after lose condition: queue <see cref="GameOverScenePath"/> (see <see cref="TryTriggerGameOver"/>).</summary>
 	private bool _gameOverSceneQueued;
 	/// <summary>True when victory is queued; blocks game over in the same run.</summary>
@@ -157,6 +158,7 @@ public partial class GridSimulator : Node2D
 	private Vector2 _lastLayoutViewportSize = Vector2.Zero;
 	/// <summary>True after the first <see cref="_Process"/>; used to avoid skipping the initial <see cref="QueueRedraw"/> before any sim step.</summary>
 	private bool _processHasRun;
+	private AudioStreamPlayer? _servantKillRoarSfx;
 
 	public override void _Ready()
 	{
@@ -197,6 +199,18 @@ public partial class GridSimulator : Node2D
 		_buildingGrowthTimer.OneShot = false;
 		_buildingGrowthTimer.Timeout += OnBuildingGrowthTick;
 		AddChild(_buildingGrowthTimer);
+
+		var roar = ResourceLoader.Load<AudioStream>(ServantKillRoarSfxPath);
+		if (roar != null)
+		{
+			_servantKillRoarSfx = new AudioStreamPlayer
+			{
+				Stream = roar,
+				VolumeDb = -3f,
+				Bus = "Master"
+			};
+			AddChild(_servantKillRoarSfx);
+		}
 
 		InitializeStartingCharacters();
 		InitializeStartingEnemies();
@@ -1926,7 +1940,10 @@ public partial class GridSimulator : Node2D
 					var h = target.Health;
 					target.Health = Mathf.Max(0, h - Servant.AttackDamage);
 					if (h > 0 && !target.IsAlive)
+					{
 						OnCharacterDied(targetIndex);
+						_servantKillRoarSfx?.Play();
+					}
 					_servantRestSecondsRemaining[si] = PostAttackStopSec;
 				}
 				continue;

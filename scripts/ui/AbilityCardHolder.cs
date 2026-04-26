@@ -7,8 +7,8 @@ using Godot;
 /// </summary>
 public partial class AbilityCardHolder : Control
 {
-	[Export] public float HoverLiftPixels { get; set; } = 3f;
-	[Export] public double HoverTweenSec { get; set; } = 0.1;
+	[Export] public float HoverLiftPixels { get; set; } = 5f;
+	[Export] public double HoverTweenSec { get; set; } = 0.12;
 
 	private Control? _card;
 	private Tween? _tween;
