@@ -1,6 +1,6 @@
 using Godot;
 
-/// <summary>Shown when all hostiles are eliminated and the colony still has survivors.</summary>
+/// <summary>Shown when no living civilians remain on the sim board.</summary>
 public partial class WinGameScreen : Control
 {
 	private const string GridSimScene = "res://scenes/grid_simulator.tscn";

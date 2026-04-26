@@ -127,6 +127,9 @@ public partial class GridSimulator : Node2D
 	private bool _gameOverSceneQueued;
 	/// <summary>True when victory is queued; blocks game over in the same run.</summary>
 	private bool _winGameSceneQueued;
+	/// <summary>True while the Servant-card lightning VFX is playing; blocks game over and duplicate card use.</summary>
+	private bool _servantLightningActive;
+	private Servant? _lightningPendingServant;
 
 	/// <summary>Lowest token cost among ability cards; lose if below this with no living Servant.</summary>
 	public static int GetMinAbilityCardTokenCost() => ServantCardCurrencyCost;
@@ -249,16 +252,77 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Pay <see cref="ServantCardCurrencyCost"/> and call <see cref="AddServant"/> if the player can afford it.</summary>
+	/// <summary>Pay <see cref="ServantCardCurrencyCost"/>, play lightning at the spawn cell, then add the Servant when the strike finishes.</summary>
 	private bool TryUseServantCard()
 	{
+		if (_servantLightningActive)
+			return false;
 		if (_playerCurrency < ServantCardCurrencyCost)
 			return false;
+		if (!TryGetNextServantSpawn(out var proto) || proto == null)
+			return false;
 		PlayerCurrency = _playerCurrency - ServantCardCurrencyCost;
-		AddServant();
+		_servantLightningActive = true;
+		StartServantLightning(proto);
 		UpdateHud();
 		QueueRedraw();
 		return true;
+	}
+
+	/// <summary>Center of the sim cell in this node’s local pixels (matches <see cref="_Draw"/>).</summary>
+	public Vector2 GetCellCenterBoardPx(Vector2I cell)
+	{
+		var s = _boardPixelsPerCell;
+		return _boardGridOrigin + new Vector2((cell.X + 0.5f) * s, (cell.Y + 0.5f) * s);
+	}
+
+	/// <summary>Top edge of the terrain board in local pixels (for lightning origin).</summary>
+	public float GetBoardLayoutTopY() => _boardGridOrigin.Y;
+
+	private void StartServantLightning(Servant proto)
+	{
+		_lightningPendingServant = proto;
+		var vfx = new LightningStrikeVfx();
+		vfx.PlaybackComplete += OnServantLightningPlaybackComplete;
+		AddChild(vfx);
+		vfx.Begin(this, proto.Cell);
+	}
+
+	private void OnServantLightningPlaybackComplete()
+	{
+		if (_lightningPendingServant != null)
+		{
+			CommitServantFromLightning(_lightningPendingServant);
+			_lightningPendingServant = null;
+		}
+		_servantLightningActive = false;
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private bool TryGetNextServantSpawn(out Servant? proto)
+	{
+		proto = null;
+		var newIndex = _servants.Count;
+		var taken = new HashSet<Vector2I>();
+		for (var j = 0; j < _servants.Count; j++)
+			taken.Add(_servants[j].Cell);
+		var start = FindRandomValidDestinationCell(null, taken);
+		var p = Servant.CreateAt(start);
+		var cell = FindNearestCellSatisfying(start, a =>
+			IsWalkableForServantAnchorCell(p, a) && !IsCellOccupiedByOtherServant(a, newIndex));
+		p.Cell = cell;
+		proto = p;
+		return true;
+	}
+
+	private void CommitServantFromLightning(Servant proto)
+	{
+		_servants.Add(proto);
+		_servantPathQueues.Add(new Queue<Vector2I>());
+		_servantMoveBudget.Add(0f);
+		_servantRestSecondsRemaining.Add(0f);
+		_servantPursueCells.Add(EnemyPursueNone);
 	}
 
 	private void OnFirstAbilitySlotGuiInput(InputEvent @event)
@@ -320,29 +384,17 @@ public partial class GridSimulator : Node2D
 		TryTriggerGameOver();
 	}
 
-	/// <summary>Victory: at least one enemy was on the board, all are dead, and at least one colonist is alive. Skips if no enemies (avoids instant win on empty list).</summary>
+	/// <summary>Victory: no living civilian remains on the board (roster <see cref="ColonyCharacterType.Civilian"/>).</summary>
 	private void TryTriggerWin()
 	{
 		if (_winGameSceneQueued || _gameOverSceneQueued)
 			return;
-		if (_enemies.Count == 0)
-			return;
-		for (var ei = 0; ei < _enemies.Count; ei++)
-		{
-			if (_enemies[ei].Health > 0)
-				return;
-		}
-		var anyColonist = false;
 		for (var i = 0; i < _characters.Count; i++)
 		{
-			if (_characters[i].Health > 0)
-			{
-				anyColonist = true;
-				break;
-			}
+			var c = _characters[i];
+			if (c.Type == ColonyCharacterType.Civilian && c.Health > 0)
+				return;
 		}
-		if (!anyColonist)
-			return;
 		_winGameSceneQueued = true;
 		SetProcess(false);
 		CallDeferred(nameof(DeferredChangeToWin));
@@ -359,6 +411,8 @@ public partial class GridSimulator : Node2D
 	private void TryTriggerGameOver()
 	{
 		if (_gameOverSceneQueued || _winGameSceneQueued)
+			return;
+		if (_servantLightningActive)
 			return;
 		if (_playerCurrency >= GetMinAbilityCardTokenCost())
 			return;
@@ -1152,25 +1206,6 @@ public partial class GridSimulator : Node2D
 				continue;
 			e.Cell = FindNearestWalkableCell(e.Cell);
 		}
-	}
-
-	/// <summary>Append a Servant on a new anchor, avoiding other servants’ cells.</summary>
-	private void AddServant()
-	{
-		var newIndex = _servants.Count;
-		var taken = new HashSet<Vector2I>();
-		for (var j = 0; j < _servants.Count; j++)
-			taken.Add(_servants[j].Cell);
-		var start = FindRandomValidDestinationCell(null, taken);
-		var proto = Servant.CreateAt(start);
-		var cell = FindNearestCellSatisfying(start, a =>
-			IsWalkableForServantAnchorCell(proto, a) && !IsCellOccupiedByOtherServant(a, newIndex));
-		proto.Cell = cell;
-		_servants.Add(proto);
-		_servantPathQueues.Add(new Queue<Vector2I>());
-		_servantMoveBudget.Add(0f);
-		_servantRestSecondsRemaining.Add(0f);
-		_servantPursueCells.Add(EnemyPursueNone);
 	}
 
 	private void EnsureServantStateSize()
