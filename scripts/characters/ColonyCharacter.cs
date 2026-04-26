@@ -26,7 +26,7 @@ public sealed class ColonyCharacter
 	public int MaxHealth { get; }
 	public int Attack { get; }
 	public bool CanAttack => Attack > 0;
-	/// <summary>0 = no combat. 1 = 3×3 (Chebyshev ≤1). 2 = 5×5 (Chebyshev ≤2).</summary>
+	/// <summary>0 = no combat. 1/2 = design 3×3 / 5×5 in <b>major</b> space; <see cref="GridSimulator"/> multiplies by <see cref="GridSimulator.MinGridLineStepCells"/> for fine-grid range checks.</summary>
 	public int AttackRangeChebyshev { get; }
 	/// <summary>How many <b>different</b> targets this unit can strike per resolution step.</summary>
 	public int MaxAttackTargets { get; }

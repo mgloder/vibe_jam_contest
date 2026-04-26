@@ -1258,13 +1258,14 @@ public partial class GridSimulator : Node2D
 			var r = a.AttackRangeChebyshev;
 			if (r <= 0)
 				continue;
+			var rFine = GetCombatChebyshevRadiusInFineCells(r);
 			var pool = new List<(int manh, int j)>();
 			for (var j = 0; j < _characters.Count; j++)
 			{
 				var t = _characters[j];
 				if (!t.IsAlive)
 					continue;
-				if (ChebyshevDistance(a.Cell, t.Cell) > r)
+				if (ChebyshevDistance(a.Cell, t.Cell) > rFine)
 					continue;
 				pool.Add((ManhattanDistance(a.Cell, t.Cell), j));
 			}
@@ -1303,6 +1304,7 @@ public partial class GridSimulator : Node2D
 			var r = a.AttackRangeChebyshev;
 			if (r <= 0)
 				continue;
+			var rFine = GetCombatChebyshevRadiusInFineCells(r);
 			var pool = new List<(int manh, ColonyAttackPoolKind kind, int index)>();
 			for (var j = 0; j < _characters.Count; j++)
 			{
@@ -1311,7 +1313,7 @@ public partial class GridSimulator : Node2D
 				var t = _characters[j];
 				if (!t.IsAlive)
 					continue;
-				if (ChebyshevDistance(a.Cell, t.Cell) > r)
+				if (ChebyshevDistance(a.Cell, t.Cell) > rFine)
 					continue;
 				pool.Add((ManhattanDistance(a.Cell, t.Cell), ColonyAttackPoolKind.Colony, j));
 			}
@@ -1320,12 +1322,12 @@ public partial class GridSimulator : Node2D
 				var e = _enemies[ei];
 				if (!e.IsAlive)
 					continue;
-				if (ChebyshevDistance(a.Cell, e.Cell) > r)
+				if (ChebyshevDistance(a.Cell, e.Cell) > rFine)
 					continue;
 				pool.Add((ManhattanDistance(a.Cell, e.Cell), ColonyAttackPoolKind.Enemy, ei));
 			}
 			if (ColonyStrikerCanDamageServant(a) && _servant != null && _servant.Health > 0 &&
-			    ChebyshevDistance(a.Cell, _servant.Cell) <= r)
+			    ChebyshevDistance(a.Cell, _servant.Cell) <= rFine)
 				pool.Add((ManhattanDistance(a.Cell, _servant.Cell), ColonyAttackPoolKind.Servant, 0));
 			pool.Sort((x, y) => x.manh.CompareTo(y.manh));
 			var hits = 0;
@@ -1370,7 +1372,7 @@ public partial class GridSimulator : Node2D
 	/// <summary>Only attack-capable colonists (Expert, Soldier) can damage the Servant at range.</summary>
 	private static bool ColonyStrikerCanDamageServant(ColonyCharacter a) => a.CanAttack;
 
-	/// <summary>Chase the closest living <see cref="ColonyCharacter"/> by anchor-cell Manhattan; attack when Chebyshev ≤1 (3×3).</summary>
+	/// <summary>Chase the closest living <see cref="ColonyCharacter"/>; melee when within design 3×3 (one major ring on this sim grid).</summary>
 	private void StepServant()
 	{
 		if (_servant is not { } servant)
@@ -1389,7 +1391,8 @@ public partial class GridSimulator : Node2D
 			return;
 		}
 
-		if (ChebyshevDistance(servant.Cell, target.Cell) <= 1)
+		var servantMeleeRFine = GetCombatChebyshevRadiusInFineCells(1);
+		if (ChebyshevDistance(servant.Cell, target.Cell) <= servantMeleeRFine)
 		{
 			_servantPathQueue.Clear();
 			if (target.IsAlive)
@@ -1524,6 +1527,17 @@ public partial class GridSimulator : Node2D
 
 	private static int ChebyshevDistance(Vector2I a, Vector2I b) =>
 		Mathf.Max(Mathf.Abs(a.X - b.X), Mathf.Abs(a.Y - b.Y));
+
+	/// <summary>
+	/// Unit stats use “major board” reach (3×3 / 5×5 in design). This sim’s path grid is fine (one step per cell);
+	/// one major step = <see cref="MinGridLineStepCells"/> fine cells. Converts r=1/2 into Chebyshev radius on the sim grid.
+	/// </summary>
+	private static int GetCombatChebyshevRadiusInFineCells(int attackRangeStat)
+	{
+		if (attackRangeStat <= 0)
+			return 0;
+		return attackRangeStat * MinGridLineStepCells;
+	}
 
 	/// <summary>Token board AABB for the Servant (includes <see cref="Servant.PixelScaleMultiplierVsCharacter"/>).</summary>
 	/// <param name="anchorCell">Cell grid position for the Servant (same as <see cref="Servant.Cell"/> for current pose).</param>

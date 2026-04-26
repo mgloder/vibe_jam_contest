@@ -15,6 +15,7 @@ public sealed class EnemyCharacter
 	public int MaxHealth { get; }
 	public int Attack { get; }
 	public bool CanAttack => Attack > 0;
+	/// <summary>Design reach in major rings; scaled by <see cref="GridSimulator.MinGridLineStepCells"/> in <see cref="GridSimulator"/> combat.</summary>
 	public int AttackRangeChebyshev { get; }
 	public int MaxAttackTargets { get; }
 	public float MajorStepsPerSecond { get; }
