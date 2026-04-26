@@ -1,4 +1,5 @@
 using Godot;
+using System.Collections.Generic;
 
 public partial class GridSimulator : Node2D
 {
@@ -11,6 +12,12 @@ public partial class GridSimulator : Node2D
 	[Export]
 	public int CellSize { get; set; } = 1;
 
+	[Export]
+	public int BuildingGrowthPerTick { get; set; } = 3;
+
+	[Export]
+	public float BuildingGrowthIntervalSec { get; set; } = 0.2f;
+
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
 	private Control _topPanel = null!;
@@ -21,6 +28,15 @@ public partial class GridSimulator : Node2D
 	private TerrainType _selectedTerrain = TerrainType.Grass;
 	private bool _hasSelectedTerrain;
 	private TerrainType[,] _terrain = null!;
+	private readonly HashSet<Vector2I> _buildingCells = new();
+	private bool _buildingSimEnabled;
+	private Timer _buildingGrowthTimer = null!;
+	private readonly Queue<Vector2I> _activeBuildingQueue = new();
+	private bool _hasActiveBuildingProject;
+	private Vector2I _activeBuildingOrigin;
+	private Vector2I _lastCompletedBuildingOrigin;
+	private int _buildingWidthCells;
+	private int _buildingHeightCells;
 
 	public override void _Ready()
 	{
@@ -30,15 +46,24 @@ public partial class GridSimulator : Node2D
 		_topPanel = GetNode<Control>("UI/TopPanel");
 		_controlPanel = GetNode<GridControlPanel>("%ControlPanel");
 		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
+		_controlPanel.BuildingSimulatorRequested += OnOpenBuildingSimulatorPressed;
+		_controlPanel.BuildingExpandSizeChanged += OnBuildingExpandSizeChanged;
 		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
 		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
 		_controlPanel.TerrainSelected += SelectTerrain;
 
 		_terrain = new TerrainType[GridWidth, GridHeight];
 		TerrainSystem.InitializeEmpty(_terrain);
+		_buildingGrowthTimer = new Timer();
+		_buildingGrowthTimer.WaitTime = BuildingGrowthIntervalSec;
+		_buildingGrowthTimer.OneShot = false;
+		_buildingGrowthTimer.Timeout += OnBuildingGrowthTick;
+		AddChild(_buildingGrowthTimer);
 
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
+		(_buildingWidthCells, _buildingHeightCells) = GetStandardBuildingSizeCells();
+		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		UpdateHud();
 	}
 
@@ -48,7 +73,8 @@ public partial class GridSimulator : Node2D
 			mouseButton.Pressed &&
 			mouseButton.ButtonIndex == MouseButton.Left)
 		{
-			PaintTerrainAt(mouseButton.Position);
+			if (!_buildingSimEnabled)
+				PaintTerrainAt(mouseButton.Position);
 			GetViewport().SetInputAsHandled();
 			return;
 		}
@@ -81,7 +107,10 @@ public partial class GridSimulator : Node2D
 			for (var x = 0; x < GridWidth; x++)
 			{
 				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
-				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
+				var cell = new Vector2I(x, y);
+				var color = _buildingCells.Contains(cell)
+					? BuildingCellColor(x, y)
+					: TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
 				DrawRect(new Rect2(px, cellSize), color);
 			}
 		}
@@ -188,9 +217,11 @@ public partial class GridSimulator : Node2D
 	private void UpdateHud()
 	{
 		var brushText = _hasSelectedTerrain ? _selectedTerrain.ToString() : "None (pick a terrain button)";
-		_statusLabel.Text = $"Character simulator scaffold | Brush: {brushText}";
+		var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
+		var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
+		_statusLabel.Text = $"Character simulator scaffold | Brush: {brushText} | Building Sim: {buildingState} | Project: {projectState}";
 		var visibility = _isCharacterVisible ? "Shown" : "Removed";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} ({_firstNpc.Type}) @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  State: {visibility}";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} ({_firstNpc.Type}) @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  NPC State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
 		_controlPanel.SetSelectedTerrain(_hasSelectedTerrain ? _selectedTerrain : null);
@@ -201,6 +232,39 @@ public partial class GridSimulator : Node2D
 		_firstNpc = ColonyCharacter.CreateRandomized(_firstNpc.Cell, _rng);
 		UpdateHud();
 		QueueRedraw();
+	}
+
+	private void OnOpenBuildingSimulatorPressed()
+	{
+		_buildingSimEnabled = !_buildingSimEnabled;
+		if (_buildingSimEnabled)
+		{
+			if (_buildingCells.Count == 0)
+			{
+				var firstOrigin = GetInitialBuildingOrigin();
+				StartBuildingProject(firstOrigin);
+			}
+			else if (!_hasActiveBuildingProject)
+			{
+				TryStartNextBuildingProject();
+			}
+
+			_buildingGrowthTimer.Start();
+		}
+		else
+		{
+			_buildingGrowthTimer.Stop();
+		}
+
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private void OnBuildingExpandSizeChanged(int delta)
+	{
+		BuildingGrowthPerTick = Mathf.Clamp(BuildingGrowthPerTick + delta, 1, 64);
+		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
+		UpdateHud();
 	}
 
 	private void OnShowCharacterPressed()
@@ -240,6 +304,136 @@ public partial class GridSimulator : Node2D
 
 		_terrain[x, y] = _selectedTerrain;
 		QueueRedraw();
+	}
+
+	private void OnBuildingGrowthTick()
+	{
+		if (!_buildingSimEnabled)
+			return;
+
+		if (!_hasActiveBuildingProject && !TryStartNextBuildingProject())
+		{
+			_buildingSimEnabled = false;
+			_buildingGrowthTimer.Stop();
+			UpdateHud();
+			return;
+		}
+
+		var additions = Mathf.Min(BuildingGrowthPerTick, _activeBuildingQueue.Count);
+		for (var i = 0; i < additions; i++)
+		{
+			var cell = _activeBuildingQueue.Dequeue();
+			_buildingCells.Add(cell);
+		}
+
+		if (_activeBuildingQueue.Count == 0)
+		{
+			_hasActiveBuildingProject = false;
+			_lastCompletedBuildingOrigin = _activeBuildingOrigin;
+		}
+
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private bool TryStartNextBuildingProject()
+	{
+		if (_buildingCells.Count == 0)
+		{
+			StartBuildingProject(GetInitialBuildingOrigin());
+			return true;
+		}
+
+		var dirs = new List<Vector2I> { Vector2I.Left, Vector2I.Right, Vector2I.Up, Vector2I.Down };
+		Shuffle(dirs);
+		var gap = 0;
+
+		foreach (var dir in dirs)
+		{
+			var candidate = _lastCompletedBuildingOrigin;
+			if (dir == Vector2I.Left)
+				candidate += new Vector2I(-_buildingWidthCells - gap, 0);
+			else if (dir == Vector2I.Right)
+				candidate += new Vector2I(_buildingWidthCells + gap, 0);
+			else if (dir == Vector2I.Up)
+				candidate += new Vector2I(0, -_buildingHeightCells - gap);
+			else if (dir == Vector2I.Down)
+				candidate += new Vector2I(0, _buildingHeightCells + gap);
+
+			if (!CanPlaceBuildingAt(candidate))
+				continue;
+
+			StartBuildingProject(candidate);
+			return true;
+		}
+
+		return false;
+	}
+
+	private Vector2I GetInitialBuildingOrigin()
+	{
+		return new Vector2I(
+			Mathf.Clamp(_firstNpc.Cell.X - _buildingWidthCells / 2, 0, GridWidth - _buildingWidthCells),
+			Mathf.Clamp(_firstNpc.Cell.Y - _buildingHeightCells / 2, 0, GridHeight - _buildingHeightCells)
+		);
+	}
+
+	private void StartBuildingProject(Vector2I origin)
+	{
+		_hasActiveBuildingProject = true;
+		_activeBuildingOrigin = origin;
+		_activeBuildingQueue.Clear();
+
+		for (var y = 0; y < _buildingHeightCells; y++)
+		{
+			for (var x = 0; x < _buildingWidthCells; x++)
+				_activeBuildingQueue.Enqueue(origin + new Vector2I(x, y));
+		}
+	}
+
+	private bool CanPlaceBuildingAt(Vector2I origin)
+	{
+		if (origin.X < 0 || origin.Y < 0)
+			return false;
+		if (origin.X + _buildingWidthCells > GridWidth || origin.Y + _buildingHeightCells > GridHeight)
+			return false;
+
+		for (var y = 0; y < _buildingHeightCells; y++)
+		{
+			for (var x = 0; x < _buildingWidthCells; x++)
+			{
+				var c = origin + new Vector2I(x, y);
+				if (_buildingCells.Contains(c))
+					return false;
+			}
+		}
+
+		return true;
+	}
+
+	private (int widthCells, int heightCells) GetStandardBuildingSizeCells()
+	{
+		var spriteWidth = _firstNpc.SpriteRows.Length == 0 ? 7 : _firstNpc.SpriteRows[0].Length;
+		var spriteHeight = Mathf.Max(1, _firstNpc.SpriteRows.Length);
+		var pixelScale = Mathf.Max(2, CellSize * 2);
+		var characterWidthCells = Mathf.Max(1, Mathf.CeilToInt((spriteWidth * pixelScale) / (float)CellSize));
+		var characterHeightCells = Mathf.Max(1, Mathf.CeilToInt((spriteHeight * pixelScale) / (float)CellSize));
+		return (characterWidthCells * 2, characterHeightCells * 2);
+	}
+
+	private void Shuffle(List<Vector2I> values)
+	{
+		for (var i = values.Count - 1; i > 0; i--)
+		{
+			var j = _rng.RandiRange(0, i);
+			(values[i], values[j]) = (values[j], values[i]);
+		}
+	}
+
+	private static Color BuildingCellColor(int x, int y)
+	{
+		var checker = ((x + y) & 1) == 0;
+		return checker ? new Color(0.73f, 0.55f, 0.31f) : new Color(0.65f, 0.47f, 0.24f);
 	}
 
 }

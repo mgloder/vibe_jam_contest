@@ -18,7 +18,7 @@ corner_radius_bottom_left = 14
 offset_left = 1028.0
 offset_top = 18.0
 offset_right = 1258.0
-offset_bottom = 294.0
+offset_bottom = 380.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 script = ExtResource("1_panel_script")
 
@@ -43,6 +43,44 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 30)
 layout_mode = 2
 text = "Randomize NPC"
+
+[node name="OpenBuildingSimulatorButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=169814227]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Expend the building area"
+
+[node name="ExpandSizeRow" type="HBoxContainer" parent="ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ExpandSizeLabel" type="Label" parent="ControlMargin/ControlVBox/ExpandSizeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+text = "Expend size"
+vertical_alignment = 1
+
+[node name="ExpandSizeDownButton" type="Button" parent="ControlMargin/ControlVBox/ExpandSizeRow" unique_id=205984765]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(26, 24)
+layout_mode = 2
+text = "-"
+
+[node name="ExpandSizeValueLabel" type="Label" parent="ControlMargin/ControlVBox/ExpandSizeRow" unique_id=116451200]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 24)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "3"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ExpandSizeUpButton" type="Button" parent="ControlMargin/ControlVBox/ExpandSizeRow" unique_id=170836250]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(26, 24)
+layout_mode = 2
+text = "+"
 
 [node name="ShowCharacterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=614502299]
 unique_name_in_owner = true
