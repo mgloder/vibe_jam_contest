@@ -88,6 +88,12 @@ public partial class GridSimulator : Node2D
 	private readonly List<Rect2I> _buildingFootprints = new();
 	private bool _buildingSimEnabled;
 	private Timer _buildingGrowthTimer = null!;
+	/// <summary>Spawns a soldier from a map building on an interval when civilian count is high enough (see <see cref="OnBuildingRecruitSoldierTimeout"/>).</summary>
+	private Timer _buildingRecruitSoldierTimer = null!;
+	/// <summary>Spawns an expert from a map building on an interval when soldier count is high enough (see <see cref="OnBuildingRecruitExpertTimeout"/>).</summary>
+	private Timer _buildingRecruitExpertTimer = null!;
+	/// <summary>Suffix for display names of units spawned from building timers.</summary>
+	private int _buildingRecruitNameCounter;
 	private readonly Queue<Vector2I> _activeBuildingQueue = new();
 	private bool _hasActiveBuildingProject;
 	private Vector2I _activeBuildingOrigin;
@@ -124,6 +130,8 @@ public partial class GridSimulator : Node2D
 	private const string GameOverScenePath = "res://scenes/game_over.tscn";
 	private const string WinGameScenePath = "res://scenes/win_game.tscn";
 	private const string ServantKillRoarSfxPath = "res://scenes/music/monster_roars.mp3";
+	private const string ServantDeathSfxPath = "res://scenes/music/monsterdeathscream.mp3";
+	private const string CivilianMassScreamSfxPath = "res://scenes/music/Massscreams.mp3";
 	/// <summary>True after lose condition: queue <see cref="GameOverScenePath"/> (see <see cref="TryTriggerGameOver"/>).</summary>
 	private bool _gameOverSceneQueued;
 	/// <summary>True when victory is queued; blocks game over in the same run.</summary>
@@ -134,6 +142,14 @@ public partial class GridSimulator : Node2D
 
 	/// <summary>Lowest token cost among ability cards; lose if below this with no living Servant.</summary>
 	public static int GetMinAbilityCardTokenCost() => ServantCardCurrencyCost;
+	/// <summary>Also win if current tokens exceed this (exclusive: need 51+ when value is 50).</summary>
+	private const int PlayerCurrencyWinMinExclusive = 50;
+	/// <summary>Recruit a soldier from a building only while living civilian count is strictly greater than this.</summary>
+	private const int BuildingRecruitCivilianCountMin = 3;
+	/// <summary>Recruit an expert from a building only while living soldier count is strictly greater than this.</summary>
+	private const int BuildingRecruitSoldierCountMinForExpert = 3;
+	private const float BuildingRecruitSoldierIntervalSec = 5f;
+	private const float BuildingRecruitExpertIntervalSec = 10f;
 	/// <summary>Tokens (currency) granted when a colonist dies, by roster type.</summary>
 	private const int TokenRewardOnCivilianDeath = 1;
 	private const int TokenRewardOnExpertDeath = 6;
@@ -159,6 +175,8 @@ public partial class GridSimulator : Node2D
 	/// <summary>True after the first <see cref="_Process"/>; used to avoid skipping the initial <see cref="QueueRedraw"/> before any sim step.</summary>
 	private bool _processHasRun;
 	private AudioStreamPlayer? _servantKillRoarSfx;
+	private AudioStreamPlayer? _servantDeathSfx;
+	private AudioStreamPlayer? _civilianMassScreamSfx;
 
 	public override void _Ready()
 	{
@@ -212,6 +230,30 @@ public partial class GridSimulator : Node2D
 			AddChild(_servantKillRoarSfx);
 		}
 
+		var deathScream = ResourceLoader.Load<AudioStream>(ServantDeathSfxPath);
+		if (deathScream != null)
+		{
+			_servantDeathSfx = new AudioStreamPlayer
+			{
+				Stream = deathScream,
+				VolumeDb = -2f,
+				Bus = "Master"
+			};
+			AddChild(_servantDeathSfx);
+		}
+
+		var massScream = ResourceLoader.Load<AudioStream>(CivilianMassScreamSfxPath);
+		if (massScream != null)
+		{
+			_civilianMassScreamSfx = new AudioStreamPlayer
+			{
+				Stream = massScream,
+				VolumeDb = -1f,
+				Bus = "Master"
+			};
+			AddChild(_civilianMassScreamSfx);
+		}
+
 		InitializeStartingCharacters();
 		InitializeStartingEnemies();
 		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
@@ -228,6 +270,22 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
+		_buildingRecruitSoldierTimer = new Timer
+		{
+			WaitTime = BuildingRecruitSoldierIntervalSec,
+			OneShot = false,
+			Autostart = true
+		};
+		_buildingRecruitSoldierTimer.Timeout += OnBuildingRecruitSoldierTimeout;
+		AddChild(_buildingRecruitSoldierTimer);
+		_buildingRecruitExpertTimer = new Timer
+		{
+			WaitTime = BuildingRecruitExpertIntervalSec,
+			OneShot = false,
+			Autostart = true
+		};
+		_buildingRecruitExpertTimer.Timeout += OnBuildingRecruitExpertTimeout;
+		AddChild(_buildingRecruitExpertTimer);
 		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel?.SetTerrainSmoothness(TerrainSmoothness);
 		_playerCurrency = Mathf.Clamp(InitialCurrency, PlayerCurrencyMin, PlayerCurrencyMax);
@@ -398,17 +456,26 @@ public partial class GridSimulator : Node2D
 		TryTriggerGameOver();
 	}
 
-	/// <summary>Victory: no living civilian remains on the board (roster <see cref="ColonyCharacterType.Civilian"/>).</summary>
+	/// <summary>Victory: no living civilian remains, or current tokens are greater than <see cref="PlayerCurrencyWinMinExclusive"/>.</summary>
 	private void TryTriggerWin()
 	{
 		if (_winGameSceneQueued || _gameOverSceneQueued)
 			return;
+		if (_playerCurrency > PlayerCurrencyWinMinExclusive)
+		{
+			StopBuildingRecruitTimers();
+			_winGameSceneQueued = true;
+			SetProcess(false);
+			CallDeferred(nameof(DeferredChangeToWin));
+			return;
+		}
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var c = _characters[i];
 			if (c.Type == ColonyCharacterType.Civilian && c.Health > 0)
 				return;
 		}
+		StopBuildingRecruitTimers();
 		_winGameSceneQueued = true;
 		SetProcess(false);
 		CallDeferred(nameof(DeferredChangeToWin));
@@ -435,6 +502,7 @@ public partial class GridSimulator : Node2D
 			if (_servants[i].Health > 0)
 				return;
 		}
+		StopBuildingRecruitTimers();
 		_gameOverSceneQueued = true;
 		SetProcess(false);
 		CallDeferred(nameof(DeferredChangeToGameOver));
@@ -838,7 +906,7 @@ public partial class GridSimulator : Node2D
 			_currencyBar.Value = _playerCurrency;
 		}
 		if (_currencyValueLabel != null)
-			_currencyValueLabel.Text = _playerCurrency.ToString();
+			_currencyValueLabel.Text = $"{_playerCurrency} / {PlayerCurrencyMax}";
 	}
 
 	private void OnRandomizeCharacterPressed()
@@ -1267,12 +1335,24 @@ public partial class GridSimulator : Node2D
 	private void OnCharacterDied(int index)
 	{
 		var c = _characters[index];
+		var wasCivilian = c.Type == ColonyCharacterType.Civilian;
 		GrantTokensForColonistDeath(c.Type);
 		c.Destination = ClampToGridBounds(c.Cell);
 		_characterPathQueues[index].Clear();
 		_characterMoveBudget[index] = 0f;
 		if (index < _characterRestSecondsRemaining.Count)
 			_characterRestSecondsRemaining[index] = 0f;
+		if (wasCivilian)
+		{
+			_civilianMassScreamSfx?.Play();
+			AssignUniqueCivilianFleeDestinationsInOrder();
+			for (var i = 0; i < _characters.Count; i++)
+			{
+				if (!_characters[i].IsAlive || _characters[i].Type != ColonyCharacterType.Civilian)
+					continue;
+				TryReplanPathWithDestinationFallback(i);
+			}
+		}
 	}
 
 	/// <summary>Top-bar currency: each colonist death pays tokens (civilian 1, expert 6, soldier 3), clamped to <see cref="PlayerCurrencyMax"/>.</summary>
@@ -1882,7 +1962,10 @@ public partial class GridSimulator : Node2D
 						var sv = _servants[item.index];
 						if (sv.Health <= 0)
 							continue;
+						var th = sv.Health;
 						sv.Health = Mathf.Max(0, sv.Health - a.Attack);
+						if (th > 0 && sv.Health <= 0)
+							_servantDeathSfx?.Play();
 						hits++;
 						break;
 					}
@@ -2253,6 +2336,85 @@ public partial class GridSimulator : Node2D
 
 	private void RecalculateCivilianFleeDestinationsFromCurrentEnemies() =>
 		AssignUniqueCivilianFleeDestinationsInOrder();
+
+	private void StopBuildingRecruitTimers()
+	{
+		_buildingRecruitSoldierTimer.Stop();
+		_buildingRecruitExpertTimer.Stop();
+	}
+
+	private void OnBuildingRecruitSoldierTimeout()
+	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return;
+		if (CountLivingColonyType(ColonyCharacterType.Civilian) <= BuildingRecruitCivilianCountMin)
+			return;
+		TrySpawnFromRandomBuilding(ColonyCharacterType.Soldier, "Recruit Soldier");
+	}
+
+	private void OnBuildingRecruitExpertTimeout()
+	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return;
+		if (CountLivingColonyType(ColonyCharacterType.Soldier) <= BuildingRecruitSoldierCountMinForExpert)
+			return;
+		TrySpawnFromRandomBuilding(ColonyCharacterType.Expert, "Hired Expert");
+	}
+
+	private int CountLivingColonyType(ColonyCharacterType type)
+	{
+		var n = 0;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (c.IsAlive && c.Type == type)
+				n++;
+		}
+		return n;
+	}
+
+	/// <summary>True if a living colonist, enemy, or servant occupies this single-cell anchor.</summary>
+	private bool IsCellOccupiedByAnyGroundUnit(Vector2I cell)
+	{
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			if (_characters[i].IsAlive && _characters[i].Cell == cell)
+				return true;
+		}
+		for (var i = 0; i < _enemies.Count; i++)
+		{
+			if (_enemies[i].IsAlive && _enemies[i].Cell == cell)
+				return true;
+		}
+		for (var i = 0; i < _servants.Count; i++)
+		{
+			if (_servants[i].Health > 0 && _servants[i].Cell == cell)
+				return true;
+		}
+		return false;
+	}
+
+	private void TrySpawnFromRandomBuilding(ColonyCharacterType type, string namePrefix)
+	{
+		if (_buildingFootprints.Count == 0)
+			return;
+		var iFoot = _rng.RandiRange(0, _buildingFootprints.Count - 1);
+		var fp = _buildingFootprints[iFoot];
+		var start = fp.Position + new Vector2I(fp.Size.X / 2, fp.Size.Y / 2);
+		var cell = FindNearestCellSatisfying(
+			start,
+			c => IsWalkableCharacterCell(c) && !IsCellOccupiedByAnyGroundUnit(c));
+		if (!IsWalkableCharacterCell(cell) || IsCellOccupiedByAnyGroundUnit(cell))
+			return;
+
+		_buildingRecruitNameCounter++;
+		var c = ColonyCharacter.CreateByType(type, cell, $"{namePrefix} {_buildingRecruitNameCounter}", null);
+		_characters.Add(c);
+		EnsurePathStateSize();
+		var newIndex = _characters.Count - 1;
+		_characters[newIndex].Destination = FindRandomValidDestinationCell(_characters[newIndex].Cell);
+		TryReplanPathWithDestinationFallback(newIndex);
+	}
 
 	private bool IsWalkableCharacterCell(Vector2I cell)
 	{

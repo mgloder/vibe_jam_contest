@@ -89,6 +89,55 @@ shadow_color = Color(0, 0, 0, 0.3)
 shadow_size = 3
 shadow_offset = Vector2(0, 1)
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_currency_track"]
+bg_color = Color(0.04, 0.055, 0.08, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.22, 0.3, 0.45, 0.85)
+corner_radius_top_left = 7
+corner_radius_top_right = 7
+corner_radius_bottom_right = 7
+corner_radius_bottom_left = 7
+content_margin_left = 0
+content_margin_top = 0
+content_margin_right = 0
+content_margin_bottom = 0
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_currency_fill"]
+bg_color = Color(0.32, 0.76, 0.58, 1)
+border_width_left = 0
+border_width_top = 0
+border_width_right = 0
+border_width_bottom = 0
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+shadow_color = Color(0, 0.35, 0.2, 0.35)
+shadow_size = 4
+shadow_offset = Vector2(0, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_currency_value_pill"]
+bg_color = Color(0.09, 0.12, 0.19, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.42, 0.6, 0.65)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 10
+content_margin_top = 5
+content_margin_right = 10
+content_margin_bottom = 5
+shadow_color = Color(0, 0, 0, 0.32)
+shadow_size = 3
+shadow_offset = Vector2(0, 1)
+
 [node name="Game" type="Node2D"]
 script = ExtResource("1_grid_sim")
 
@@ -124,7 +173,7 @@ anchor_bottom = 0.0
 offset_left = 0.0
 offset_top = 0.0
 offset_right = 0.0
-offset_bottom = 48.0
+offset_bottom = 52.0
 grow_horizontal = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_topbar")
 
@@ -137,26 +186,46 @@ theme_override_constants/margin_bottom = 8
 
 [node name="CurrencyRow" type="HBoxContainer" parent="UI/TopPanel/TopMargin"]
 layout_mode = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 12
+alignment = 0
+
+[node name="CurrencyTitle" type="Label" parent="UI/TopPanel/TopMargin/CurrencyRow"]
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_font_sizes/font_size = 12
+theme_override_colors/font_color = Color(0.5, 0.58, 0.7, 1)
+text = "Tokens"
+vertical_alignment = 1
 
 [node name="CurrencyBar" type="ProgressBar" parent="UI/TopPanel/TopMargin/CurrencyRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(180, 22)
+custom_minimum_size = Vector2(200, 26)
 layout_mode = 2
 size_flags_horizontal = 3
+size_flags_vertical = 1
 min_value = 0.0
 max_value = 100.0
 value = 12.0
 show_percentage = false
-theme_override_font_sizes/font_size = 12
+theme_override_styles/background = SubResource("StyleBoxFlat_currency_track")
+theme_override_styles/fill = SubResource("StyleBoxFlat_currency_fill")
+theme_override_font_sizes/font_size = 11
 
-[node name="CurrencyValueLabel" type="Label" parent="UI/TopPanel/TopMargin/CurrencyRow"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(40, 0)
+[node name="CurrencyValuePill" type="PanelContainer" parent="UI/TopPanel/TopMargin/CurrencyRow"]
+custom_minimum_size = Vector2(0, 32)
 layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "12"
-horizontal_alignment = 2
+size_flags_vertical = 1
+theme_override_styles/panel = SubResource("StyleBoxFlat_currency_value_pill")
+
+[node name="CurrencyValueLabel" type="Label" parent="UI/TopPanel/TopMargin/CurrencyRow/CurrencyValuePill"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(70, 0)
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_font_sizes/font_size = 13
+theme_override_colors/font_color = Color(0.88, 0.92, 0.98, 1)
+text = "12 / 100"
+horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="AbilityBar" type="PanelContainer" parent="UI"]
