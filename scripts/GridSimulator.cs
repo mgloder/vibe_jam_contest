@@ -11,14 +11,15 @@ public partial class GridSimulator : Node2D
 	[Export]
 	public int CellSize { get; set; } = 1;
 
-	[Export]
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
+	private Vector2I _firstNpcCell;
 
 	public override void _Ready()
 	{
 		_statusLabel = GetNode<Label>("%StatusLabel");
 		_statsLabel = GetNode<Label>("%StatsLabel");
+		_firstNpcCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		UpdateHud();
 	}
 
@@ -74,7 +75,51 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
+		DrawFirstNpc(origin);
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
+	}
+
+	private void DrawFirstNpc(Vector2 gridOrigin)
+	{
+		var cellTopLeft = gridOrigin + new Vector2(_firstNpcCell.X * CellSize, _firstNpcCell.Y * CellSize);
+		var pixelScale = Mathf.Max(2, CellSize * 2);
+
+		// 7x9 tiny pawn sprite (RimWorld-like top-down placeholder).
+		var sprite = new[]
+		{
+			"..GGG..",
+			".GSSSG.",
+			".GSSSG.",
+			"..BBB..",
+			".BBTBB.",
+			".BBTBB.",
+			"..LLL..",
+			".L...L.",
+			"L.....L"
+		};
+
+		for (var y = 0; y < sprite.Length; y++)
+		{
+			for (var x = 0; x < sprite[y].Length; x++)
+			{
+				var token = sprite[y][x];
+				if (token == '.')
+					continue;
+
+				var color = token switch
+				{
+					'G' => new Color(0.16f, 0.17f, 0.20f), // hair/outline
+					'S' => new Color(0.95f, 0.81f, 0.68f), // skin
+					'B' => new Color(0.38f, 0.66f, 0.96f), // shirt
+					'T' => new Color(0.10f, 0.14f, 0.22f), // belt/shadow
+					'L' => new Color(0.30f, 0.35f, 0.43f), // legs
+					_ => Colors.White
+				};
+
+				var px = cellTopLeft + new Vector2(x * pixelScale - 3 * pixelScale, y * pixelScale - 4 * pixelScale);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
 	}
 
 	private Vector2 GetGridOrigin()
@@ -89,7 +134,7 @@ public partial class GridSimulator : Node2D
 
 	private void UpdateHud()
 	{
-		_statusLabel.Text = "Empty simulation board scaffold";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  Cell: {CellSize}px  |  Press R to redraw";
+		_statusLabel.Text = "RimWorld-style scaffold with first NPC";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: ({_firstNpcCell.X}, {_firstNpcCell.Y})  |  Press R to redraw";
 	}
 }
