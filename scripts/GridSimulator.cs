@@ -98,6 +98,9 @@ public partial class GridSimulator : Node2D
 	private Timer _buildingRecruitExpertTimer = null!;
 	/// <summary>Suffix for display names of units spawned from building timers.</summary>
 	private int _buildingRecruitNameCounter;
+	/// <summary>While living civilians are below <see cref="CivilianReplenishMinCount"/>, spawns one per <see cref="CivilianReplenishIntervalSec"/> (see <see cref="OnCivilianReplenishTimeout"/>).</summary>
+	private Timer _civilianReplenishTimer = null!;
+	private int _civilianReplenishNameCounter;
 	private readonly Queue<Vector2I> _activeBuildingQueue = new();
 	private bool _hasActiveBuildingProject;
 	private Vector2I _activeBuildingOrigin;
@@ -160,6 +163,9 @@ public partial class GridSimulator : Node2D
 	private const int BuildingRecruitSoldierCountMinForExpert = 3;
 	private const float BuildingRecruitSoldierIntervalSec = 5f;
 	private const float BuildingRecruitExpertIntervalSec = 10f;
+	/// <summary>Spawn a new civilian on an interval when living civilian count is strictly below this (i.e. 0 or 1).</summary>
+	private const int CivilianReplenishMinCount = 2;
+	private const float CivilianReplenishIntervalSec = 3f;
 	/// <summary>Tokens (currency) granted when a colonist dies, by roster type.</summary>
 	private const int TokenRewardOnCivilianDeath = 1;
 	private const int TokenRewardOnExpertDeath = 6;
@@ -325,6 +331,14 @@ public partial class GridSimulator : Node2D
 		};
 		_buildingRecruitExpertTimer.Timeout += OnBuildingRecruitExpertTimeout;
 		AddChild(_buildingRecruitExpertTimer);
+		_civilianReplenishTimer = new Timer
+		{
+			WaitTime = CivilianReplenishIntervalSec,
+			OneShot = false,
+			Autostart = true
+		};
+		_civilianReplenishTimer.Timeout += OnCivilianReplenishTimeout;
+		AddChild(_civilianReplenishTimer);
 		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel?.SetTerrainSmoothness(TerrainSmoothness);
 		_playerCurrency = Mathf.Clamp(InitialCurrency, PlayerCurrencyMin, PlayerCurrencyMax);
@@ -2576,6 +2590,7 @@ public partial class GridSimulator : Node2D
 	{
 		_buildingRecruitSoldierTimer.Stop();
 		_buildingRecruitExpertTimer.Stop();
+		_civilianReplenishTimer.Stop();
 	}
 
 	private void OnBuildingRecruitSoldierTimeout()
@@ -2594,6 +2609,42 @@ public partial class GridSimulator : Node2D
 		if (CountLivingColonyType(ColonyCharacterType.Soldier) <= BuildingRecruitSoldierCountMinForExpert)
 			return;
 		TrySpawnFromRandomBuilding(ColonyCharacterType.Expert, "Hired Expert");
+	}
+
+	private void OnCivilianReplenishTimeout()
+	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return;
+		if (CountLivingColonyType(ColonyCharacterType.Civilian) >= CivilianReplenishMinCount)
+			return;
+		if (!TryFindSpawnCellForReplenishCivilian(out var cell))
+			return;
+		_civilianReplenishNameCounter++;
+		var c = ColonyCharacter.CreateByType(ColonyCharacterType.Civilian, cell, $"Settler {_civilianReplenishNameCounter}", null);
+		_characters.Add(c);
+		EnsurePathStateSize();
+		AssignUniqueCivilianFleeDestinationsInOrder();
+		for (var j = 0; j < _characters.Count; j++)
+		{
+			if (_characters[j].IsAlive)
+				TryReplanPathWithDestinationFallback(j);
+		}
+		QueueRedraw();
+	}
+
+	/// <summary>Random unoccupied walkable cell for a new civilian (same rules as other ground units).</summary>
+	private bool TryFindSpawnCellForReplenishCivilian(out Vector2I cell)
+	{
+		cell = default;
+		for (var t = 0; t < 200; t++)
+		{
+			var c = FindRandomValidDestinationCell();
+			if (IsCellOccupiedByAnyGroundUnit(c))
+				continue;
+			cell = c;
+			return true;
+		}
+		return false;
 	}
 
 	private int CountLivingColonyType(ColonyCharacterType type)
