@@ -1,7 +1,6 @@
 using System;
 using Godot;
 using System.Collections.Generic;
-using System.Linq;
 
 public partial class GridSimulator : Node2D
 {
@@ -32,6 +31,10 @@ public partial class GridSimulator : Node2D
 	private readonly List<EnemyCharacter> _enemies = new();
 	private readonly List<Queue<Vector2I>> _enemyPathQueues = new();
 	private readonly List<float> _enemyMoveBudget = new();
+	/// <summary>Invalid sentinel for <see cref="_enemyPursueCells"/>; grid coords are always non-negative.</summary>
+	private static readonly Vector2I EnemyPursueNone = new(-1, -1);
+	private readonly List<float> _enemyRestSecondsRemaining = new();
+	private readonly List<Vector2I> _enemyPursueCells = new();
 	private Servant? _servant;
 	private Vector2I? _servantPursueCell;
 	private readonly Queue<Vector2I> _servantPathQueue = new();
@@ -39,7 +42,19 @@ public partial class GridSimulator : Node2D
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
+	private Image? _terrainBoardImage;
+	private ImageTexture? _terrainBoardTexture;
 	private float _characterMoveAccumulatorSec;
+
+	private enum ColonyAttackPoolKind
+	{
+		Servant,
+		Enemy
+	}
+
+	/// <summary>Reused to avoid per-tick List allocations in combat.</summary>
+	private readonly List<(int manh, int j)> _enemyCombatPool = new();
+	private readonly List<(int manh, ColonyAttackPoolKind kind, int index)> _colonyCombatPool = new();
 	private readonly List<Queue<Vector2I>> _characterPathQueues = new();
 	private readonly List<float> _characterMoveBudget = new();
 	private readonly HashSet<Vector2I> _buildingCells = new();
@@ -52,8 +67,12 @@ public partial class GridSimulator : Node2D
 	private Vector2I _lastCompletedBuildingOrigin;
 	private int _buildingWidthCells;
 	private int _buildingHeightCells;
-	private Texture2D _buildingTexture = null!;
+	private Texture2D _buildingTexture3 = null!;
+	private Texture2D _buildingTexture4 = null!;
+	private readonly List<Texture2D> _buildingFootprintTextures = new();
 	private const int BuildingSizeMultiplier = 2;
+	/// <summary>Draw <see cref="_buildingTexture3"/> this many times larger (centered on the same footprint; path logic unchanged).</summary>
+	private const float Build3TextureDisplayScale = 2f;
 	/// <summary>Major grid line spacing in cell units (one “major step” in design docs).</summary>
 	public const int MinGridLineStepCells = 10;
 	/// <summary>Seconds between path-movement ticks. Smaller = smoother motion; each tick accrues budget for 4-way steps.</summary>
@@ -84,6 +103,7 @@ public partial class GridSimulator : Node2D
 	private float _servantRestSecondsRemaining;
 	/// <summary>Pixels per grid cell for drawing and on-screen fit; ≤ <see cref="CellSize"/>, never larger than needed to fit the window.</summary>
 	private float _boardPixelsPerCell = 1f;
+	private Vector2 _boardGridOrigin;
 
 	public override void _Ready()
 	{
@@ -106,7 +126,10 @@ public partial class GridSimulator : Node2D
 
 		_terrain = new TerrainType[GridWidth, GridHeight];
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
-		_buildingTexture = GD.Load<Texture2D>("res://sprites/buildings/building.png");
+		TextureFilter = CanvasItem.TextureFilterEnum.Nearest;
+		RefreshTerrainBoardTexture();
+		_buildingTexture3 = GD.Load<Texture2D>("res://sprites/buildings/build3.png");
+		_buildingTexture4 = GD.Load<Texture2D>("res://sprites/buildings/build4.png");
 		_buildingGrowthTimer = new Timer();
 		_buildingGrowthTimer.WaitTime = BuildingGrowthIntervalSec;
 		_buildingGrowthTimer.OneShot = false;
@@ -131,7 +154,7 @@ public partial class GridSimulator : Node2D
 			TryReplanEnemyPathWithDestinationFallback(pe);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
-		UpdateBoardDisplayMetrics();
+		UpdateBoardLayout();
 		UpdateHud();
 	}
 
@@ -151,9 +174,11 @@ public partial class GridSimulator : Node2D
 
 	public override void _Process(double delta)
 	{
-		UpdateBoardDisplayMetrics();
 		var d = (float)delta;
 		_servantRestSecondsRemaining = Mathf.Max(0f, _servantRestSecondsRemaining - d);
+		EnsureEnemyPathStateSize();
+		for (var ei = 0; ei < _enemies.Count; ei++)
+			_enemyRestSecondsRemaining[ei] = Mathf.Max(0f, _enemyRestSecondsRemaining[ei] - d);
 
 		_characterMoveAccumulatorSec += d;
 		if (_characterMoveAccumulatorSec < CharacterMoveStepSec)
@@ -175,25 +200,16 @@ public partial class GridSimulator : Node2D
 
 	public override void _Draw()
 	{
-		UpdateBoardDisplayMetrics();
 		var s = _boardPixelsPerCell;
-		var origin = GetGridOrigin();
+		var origin = _boardGridOrigin;
 		var boardSize = new Vector2(GridWidth * s, GridHeight * s);
 
-		// Retro-style base board with hard-edged palette blocks.
-		DrawRect(new Rect2(origin, boardSize), new Color(0.07f, 0.08f, 0.12f));
-
-		// Keep tiles exactly on grid boundaries.
-		var cellPad = 0f;
-		var cellSizeVec = new Vector2(s - cellPad * 2f, s - cellPad * 2f);
-		for (var y = 0; y < GridHeight; y++)
+		// One scaled texture for the full terrain (avoids hundreds of thousands of per-cell draw calls per frame).
+		if (_terrainBoardTexture != null)
+			DrawTextureRect(_terrainBoardTexture, new Rect2(origin, boardSize), false);
+		else
 		{
-			for (var x = 0; x < GridWidth; x++)
-			{
-				var px = origin + new Vector2(x * s + cellPad, y * s + cellPad);
-				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
-				DrawRect(new Rect2(px, cellSizeVec), color);
-			}
+			DrawRect(new Rect2(origin, boardSize), new Color(0.07f, 0.08f, 0.12f));
 		}
 
 		DrawBuildingSprites(origin);
@@ -421,13 +437,14 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Keeps the full <see cref="GridWidth"/>×<see cref="GridHeight"/> sim visible in the area left of the control panel, capped by <see cref="CellSize"/>.</summary>
-	private void UpdateBoardDisplayMetrics()
+	/// <summary>Keeps the full <see cref="GridWidth"/>×<see cref="GridHeight"/> sim visible in the area left of the control panel, capped by <see cref="CellSize"/>; also caches <see cref="_boardGridOrigin"/> for drawing.</summary>
+	private void UpdateBoardLayout()
 	{
 		var v = GetViewport().GetVisibleRect().Size;
 		if (v.X < 2f || v.Y < 2f)
 		{
 			_boardPixelsPerCell = Mathf.Max(1f, CellSize);
+			_boardGridOrigin = new Vector2(16f, 74f);
 			return;
 		}
 		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
@@ -446,56 +463,83 @@ public partial class GridSimulator : Node2D
 		var fitW = availableWidth / Mathf.Max(1, GridWidth);
 		var fitH = availableHeight / Mathf.Max(1, GridHeight);
 		_boardPixelsPerCell = Mathf.Max(1f, Mathf.Min((float)CellSize, Mathf.Min(fitW, fitH)));
-	}
-
-	private Vector2 GetGridOrigin()
-	{
 		var s = _boardPixelsPerCell;
 		var boardWidth = GridWidth * s;
 		var boardHeight = GridHeight * s;
-
-		// Reserve space for the right-side control panel so the board never renders underneath it.
-		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
-		if (panelLeftX < 4f)
-			panelLeftX = GetViewport().GetVisibleRect().Size.X - 240f;
-		var leftPadding = 16f;
-		var rightPadding = 12f;
-		var availableWidth = panelLeftX - rightPadding - leftPadding;
 		var x = Mathf.Floor(leftPadding + (availableWidth - boardWidth) * 0.5f);
 		x = Mathf.Max(leftPadding, x);
-
-		// Reserve space for the top info panel.
-		var topPanelBottom = _topPanel.GetGlobalRect().End.Y;
-		if (topPanelBottom < 1f)
-			topPanelBottom = 74f;
-		var topPadding = 10f;
-		var bottomPadding = 16f;
-		var topBound = topPanelBottom + topPadding;
-		var vh = GetViewport().GetVisibleRect().Size.Y;
-		var availableHeight = vh - topBound - bottomPadding;
 		var y = Mathf.Floor(topBound + (availableHeight - boardHeight) * 0.5f);
 		y = Mathf.Max(topBound, y);
+		_boardGridOrigin = new Vector2(x, y);
+	}
 
-		return new Vector2(x, y);
+	/// <summary>Rebuilds the 1-px-per-cell CPU terrain image; call after any change to <see cref="_terrain"/>.</summary>
+	private void RefreshTerrainBoardTexture()
+	{
+		if (GridWidth <= 0 || GridHeight <= 0)
+			return;
+		if (_terrainBoardImage == null
+		    || _terrainBoardImage.GetWidth() != GridWidth
+		    || _terrainBoardImage.GetHeight() != GridHeight)
+		{
+			_terrainBoardImage = Image.CreateEmpty(GridWidth, GridHeight, false, Image.Format.Rgb8);
+		}
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+				_terrainBoardImage.SetPixel(x, y, TerrainSystem.TerrainToColor(_terrain[x, y], x, y));
+		}
+		if (_terrainBoardTexture == null)
+			_terrainBoardTexture = ImageTexture.CreateFromImage(_terrainBoardImage);
+		else
+			_terrainBoardTexture.Update(_terrainBoardImage);
 	}
 
 	private void UpdateHud()
 	{
-		UpdateBoardDisplayMetrics();
+		UpdateBoardLayout();
 		var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
 		var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
 		_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
 		var visibility = _isCharacterVisible ? "Shown" : "Removed";
-		var civilianCount = _characters.Count(c => c.Type == ColonyCharacterType.Civilian);
-		var expertCount = _characters.Count(c => c.Type == ColonyCharacterType.Expert);
-		var soldierCount = _characters.Count(c => c.Type == ColonyCharacterType.Soldier);
-		var crazyCount = _enemies.Count(c => c.Type == EnemyType.Crazy);
-		var monsterCount = _enemies.Count(c => c.Type == EnemyType.Monster);
-		var profileC = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Civilian);
-		var profileE = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Expert);
-		var profileS = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Soldier);
-		var profileCr = _enemies.FirstOrDefault(c => c.Type == EnemyType.Crazy);
-		var profileM = _enemies.FirstOrDefault(c => c.Type == EnemyType.Monster);
+		var civilianCount = 0;
+		var expertCount = 0;
+		var soldierCount = 0;
+		ColonyCharacter? profileC = null, profileE = null, profileS = null;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			switch (_characters[i].Type)
+			{
+				case ColonyCharacterType.Civilian:
+					civilianCount++;
+					profileC ??= _characters[i];
+					break;
+				case ColonyCharacterType.Expert:
+					expertCount++;
+					profileE ??= _characters[i];
+					break;
+				case ColonyCharacterType.Soldier:
+					soldierCount++;
+					profileS ??= _characters[i];
+					break;
+			}
+		}
+		var crazyCount = 0;
+		var monsterCount = 0;
+		EnemyCharacter? profileCr = null, profileM = null;
+		for (var i = 0; i < _enemies.Count; i++)
+		{
+			if (_enemies[i].Type == EnemyType.Crazy)
+			{
+				crazyCount++;
+				profileCr ??= _enemies[i];
+			}
+			else if (_enemies[i].Type == EnemyType.Monster)
+			{
+				monsterCount++;
+				profileM ??= _enemies[i];
+			}
+		}
 		var civStr = profileC != null ? $"{profileC.MaxHealth}HP/{profileC.Attack}atk" : "1/0";
 		var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "6/3";
 		var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
@@ -557,6 +601,7 @@ public partial class GridSimulator : Node2D
 	private void OnGenerateTerrainPressed()
 	{
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		RefreshTerrainBoardTexture();
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
@@ -572,6 +617,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
+		UpdateHud();
 		QueueRedraw();
 	}
 
@@ -585,6 +631,7 @@ public partial class GridSimulator : Node2D
 					_terrain[x, y] = TerrainType.None;
 			}
 		}
+		RefreshTerrainBoardTexture();
 
 		RelocateEnemiesToWalkableGround();
 		EnsureCharacterDestinationsAreValid();
@@ -597,6 +644,7 @@ public partial class GridSimulator : Node2D
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
 		EnsureServantOnWalkable();
+		UpdateHud();
 		QueueRedraw();
 	}
 
@@ -606,6 +654,7 @@ public partial class GridSimulator : Node2D
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		RefreshTerrainBoardTexture();
 		RelocateCharactersToWalkableGround();
 		RelocateEnemiesToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
@@ -621,6 +670,7 @@ public partial class GridSimulator : Node2D
 			TryReplanPathWithDestinationFallback(pi);
 		for (var pe = 0; pe < _enemies.Count; pe++)
 			TryReplanEnemyPathWithDestinationFallback(pe);
+		UpdateHud();
 		QueueRedraw();
 	}
 
@@ -679,16 +729,31 @@ public partial class GridSimulator : Node2D
 
 	private void DrawBuildingSprites(Vector2 gridOrigin)
 	{
-		if (_buildingTexture == null)
+		if (_buildingFootprints.Count == 0 || _buildingFootprints.Count != _buildingFootprintTextures.Count)
 			return;
 
 		var s = _boardPixelsPerCell;
 		for (var i = 0; i < _buildingFootprints.Count; i++)
 		{
+			var tex = _buildingFootprintTextures[i];
+			if (tex == null)
+				continue;
 			var footprint = _buildingFootprints[i];
-			var topLeft = gridOrigin + new Vector2(footprint.Position.X * s, footprint.Position.Y * s);
-			var drawSize = new Vector2(footprint.Size.X * s, footprint.Size.Y * s);
-			DrawTextureRect(_buildingTexture, new Rect2(topLeft, drawSize), false);
+			var footprintTop = gridOrigin + new Vector2(footprint.Position.X * s, footprint.Position.Y * s);
+			var baseSize = new Vector2(footprint.Size.X * s, footprint.Size.Y * s);
+			Vector2 topLeft;
+			Vector2 drawSize;
+			if (ReferenceEquals(tex, _buildingTexture3))
+			{
+				drawSize = baseSize * Build3TextureDisplayScale;
+				topLeft = footprintTop - baseSize * 0.5f * (Build3TextureDisplayScale - 1f);
+			}
+			else
+			{
+				topLeft = footprintTop;
+				drawSize = baseSize;
+			}
+			DrawTextureRect(tex, new Rect2(topLeft, drawSize), false);
 		}
 	}
 
@@ -699,6 +764,7 @@ public partial class GridSimulator : Node2D
 
 		_buildingCells.Clear();
 		_buildingFootprints.Clear();
+		_buildingFootprintTextures.Clear();
 		_activeBuildingQueue.Clear();
 		_hasActiveBuildingProject = false;
 
@@ -719,7 +785,8 @@ public partial class GridSimulator : Node2D
 			if (!CanPlaceBuildingFootprint(origin))
 				continue;
 
-			AddBuildingFootprint(origin);
+			var art = placed == 0 ? _buildingTexture3 : _buildingTexture4;
+			AddBuildingFootprint(origin, art);
 			_lastCompletedBuildingOrigin = origin;
 			placed++;
 		}
@@ -747,9 +814,10 @@ public partial class GridSimulator : Node2D
 		return true;
 	}
 
-	private void AddBuildingFootprint(Vector2I origin)
+	private void AddBuildingFootprint(Vector2I origin, Texture2D sprite)
 	{
 		_buildingFootprints.Add(new Rect2I(origin, new Vector2I(_buildingWidthCells, _buildingHeightCells)));
+		_buildingFootprintTextures.Add(sprite);
 		for (var y = 0; y < _buildingHeightCells; y++)
 		{
 			for (var x = 0; x < _buildingWidthCells; x++)
@@ -898,6 +966,12 @@ public partial class GridSimulator : Node2D
 		e.Destination = e.Cell;
 		_enemyPathQueues[index].Clear();
 		_enemyMoveBudget[index] = 0f;
+		EnsureEnemyPathStateSize();
+		if (index < _enemyRestSecondsRemaining.Count)
+		{
+			_enemyRestSecondsRemaining[index] = 0f;
+			_enemyPursueCells[index] = EnemyPursueNone;
+		}
 	}
 
 	private void EnsureCharacterDestinationsAreValid()
@@ -1024,11 +1098,15 @@ public partial class GridSimulator : Node2D
 		{
 			_enemyPathQueues.Add(new Queue<Vector2I>());
 			_enemyMoveBudget.Add(0f);
+			_enemyRestSecondsRemaining.Add(0f);
+			_enemyPursueCells.Add(EnemyPursueNone);
 		}
 		while (_enemyPathQueues.Count > _enemies.Count)
 		{
 			_enemyPathQueues.RemoveAt(_enemyPathQueues.Count - 1);
 			_enemyMoveBudget.RemoveAt(_enemyMoveBudget.Count - 1);
+			_enemyRestSecondsRemaining.RemoveAt(_enemyRestSecondsRemaining.Count - 1);
+			_enemyPursueCells.RemoveAt(_enemyPursueCells.Count - 1);
 		}
 	}
 
@@ -1193,12 +1271,22 @@ public partial class GridSimulator : Node2D
 			var pathQueue = _enemyPathQueues[ei];
 			if (e.Health <= 0)
 				continue;
-			if (e.Cell == e.Destination)
+			if (_enemyRestSecondsRemaining[ei] > 0f)
+				continue;
+			if (!TryGetEnemyChaseTarget(ei, out var chase, out _))
 			{
-				e.Destination = FindNewDestinationAfterArrivalEnemy(e);
-				TryReplanEnemyPathWithDestinationFallback(ei);
+				pathQueue.Clear();
+				_enemyPursueCells[ei] = EnemyPursueNone;
 				continue;
 			}
+
+			e.Destination = chase!.Cell;
+			if (pathQueue.Count == 0 || _enemyPursueCells[ei] != chase.Cell)
+			{
+				_enemyPursueCells[ei] = chase.Cell;
+				ReplanEnemyPath(ei);
+			}
+
 			_enemyMoveBudget[ei] += MovementBudgetPerGridMajorStep * (e.MajorStepsPerSecond / 2f);
 			var movedEnemy = false;
 			while (_enemyMoveBudget[ei] > 0f)
@@ -1206,7 +1294,7 @@ public partial class GridSimulator : Node2D
 				if (pathQueue.Count == 0)
 				{
 					if (!ReplanEnemyPath(ei))
-						TryReplanEnemyPathWithDestinationFallback(ei);
+						break;
 					if (pathQueue.Count == 0)
 						break;
 				}
@@ -1216,16 +1304,12 @@ public partial class GridSimulator : Node2D
 				{
 					ReplanEnemyPath(ei);
 					if (pathQueue.Count == 0)
-						TryReplanEnemyPathWithDestinationFallback(ei);
-					if (pathQueue.Count == 0)
 						break;
 					continue;
 				}
 				if (!IsWalkableCharacterCell(next))
 				{
 					ReplanEnemyPath(ei);
-					if (pathQueue.Count == 0)
-						TryReplanEnemyPathWithDestinationFallback(ei);
 					if (pathQueue.Count == 0)
 						break;
 					continue;
@@ -1250,16 +1334,20 @@ public partial class GridSimulator : Node2D
 	/// <summary>Enemies only hit colonists, not the Servant or each other.</summary>
 	private void StepEnemyCombat()
 	{
+		EnsureEnemyPathStateSize();
 		for (var ei = 0; ei < _enemies.Count; ei++)
 		{
 			var a = _enemies[ei];
 			if (!a.IsAlive || !a.CanAttack)
 				continue;
+			if (_enemyRestSecondsRemaining[ei] > 0f)
+				continue;
 			var r = a.AttackRangeChebyshev;
 			if (r <= 0)
 				continue;
 			var rFine = GetCombatChebyshevRadiusInFineCells(r);
-			var pool = new List<(int manh, int j)>();
+			var pool = _enemyCombatPool;
+			pool.Clear();
 			for (var j = 0; j < _characters.Count; j++)
 			{
 				var t = _characters[j];
@@ -1283,17 +1371,12 @@ public partial class GridSimulator : Node2D
 					OnCharacterDied(j);
 				hits++;
 			}
+			if (hits > 0)
+				_enemyRestSecondsRemaining[ei] = ServantPostAttackStopSec;
 		}
 	}
 
-	private enum ColonyAttackPoolKind
-	{
-		Colony,
-		Servant,
-		Enemy
-	}
-
-	/// <summary>Colony strikers hit other colonists, <see cref="EnemyCharacter"/>, and (if in range) the <see cref="Servant"/>.</summary>
+	/// <summary>Colony strikers hit <see cref="EnemyCharacter"/> and (if in range) the <see cref="Servant"/>; they do not damage other colonists.</summary>
 	private void StepColonyCharacterCombat()
 	{
 		for (var ai = 0; ai < _characters.Count; ai++)
@@ -1305,18 +1388,8 @@ public partial class GridSimulator : Node2D
 			if (r <= 0)
 				continue;
 			var rFine = GetCombatChebyshevRadiusInFineCells(r);
-			var pool = new List<(int manh, ColonyAttackPoolKind kind, int index)>();
-			for (var j = 0; j < _characters.Count; j++)
-			{
-				if (j == ai)
-					continue;
-				var t = _characters[j];
-				if (!t.IsAlive)
-					continue;
-				if (ChebyshevDistance(a.Cell, t.Cell) > rFine)
-					continue;
-				pool.Add((ManhattanDistance(a.Cell, t.Cell), ColonyAttackPoolKind.Colony, j));
-			}
+			var pool = _colonyCombatPool;
+			pool.Clear();
 			for (var ei = 0; ei < _enemies.Count; ei++)
 			{
 				var e = _enemies[ei];
@@ -1340,18 +1413,6 @@ public partial class GridSimulator : Node2D
 						_servant!.Health = Mathf.Max(0, _servant.Health - a.Attack);
 						hits++;
 						break;
-					case ColonyAttackPoolKind.Colony:
-					{
-						var t = _characters[item.index];
-						if (!t.IsAlive)
-							continue;
-						var th = t.Health;
-						t.Health = Mathf.Max(0, t.Health - a.Attack);
-						if (th > 0 && t.Health <= 0)
-							OnCharacterDied(item.index);
-						hits++;
-						break;
-					}
 					case ColonyAttackPoolKind.Enemy:
 					{
 						var e = _enemies[item.index];
@@ -1486,6 +1547,37 @@ public partial class GridSimulator : Node2D
 		return true;
 	}
 
+	/// <summary>Nearest living <see cref="ColonyCharacter"/> to this enemy by anchor Manhattan; ties favor lower list index.</summary>
+	private bool TryGetEnemyChaseTarget(int enemyIndex, out ColonyCharacter? target, out int index)
+	{
+		target = null;
+		index = -1;
+		if (enemyIndex < 0 || enemyIndex >= _enemies.Count)
+			return false;
+		var s = _enemies[enemyIndex];
+		if (s.Health <= 0)
+			return false;
+		ColonyCharacter? best = null;
+		var bestD = int.MaxValue;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (!c.IsAlive)
+				continue;
+			var d = ManhattanDistance(s.Cell, c.Cell);
+			if (d < bestD || d == bestD && (index < 0 || i < index))
+			{
+				bestD = d;
+				best = c;
+				index = i;
+			}
+		}
+		if (best == null)
+			return false;
+		target = best;
+		return true;
+	}
+
 	/// <summary>Nearest living NPC by anchor <see cref="ColonyCharacter.Cell"/> Manhattan; ties favor lower list index.</summary>
 	private bool TryGetServantChaseTarget(out ColonyCharacter? target, out int index)
 	{
@@ -1518,9 +1610,6 @@ public partial class GridSimulator : Node2D
 		c.Type == ColonyCharacterType.Civilian
 			? FindCivilianFleeDestination(c, c.Cell)
 			: FindRandomValidDestinationCell(c.Cell);
-
-	private Vector2I FindNewDestinationAfterArrivalEnemy(EnemyCharacter e) =>
-		FindRandomValidDestinationCell(e.Cell);
 
 	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
 		Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y);
@@ -1689,6 +1778,7 @@ public partial class GridSimulator : Node2D
 	{
 		_buildingCells.Clear();
 		_buildingFootprints.Clear();
+		_buildingFootprintTextures.Clear();
 		_activeBuildingQueue.Clear();
 		_hasActiveBuildingProject = false;
 		_buildingSimEnabled = false;
