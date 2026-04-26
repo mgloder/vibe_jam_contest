@@ -370,7 +370,7 @@ size_flags_vertical = 3
 mouse_filter = 2
 theme_override_font_sizes/font_size = 8
 theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Spawns a Servant at a random valid spot. Click or press 1 (when you can pay)."
+text = "Click or press 1 to aim (6 tokens), then left-click the map to place a Servant. Esc / right-click cancels."
 autowrap_mode = 2
 
 [node name="AbilityCardHolder2" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]
@@ -489,7 +489,7 @@ size_flags_vertical = 3
 mouse_filter = 2
 theme_override_font_sizes/font_size = 7
 theme_override_colors/font_color = Color(0.72, 0.75, 0.82, 0.95)
-text = "Arming spawns a random Crazy. Then left-click the map: civilians in range turn to crazies (3 tokens, if any are there). Press 2 or this card, Esc or right-click to cancel."
+text = "Left-click the map: civilians in range turn to crazies (3 tokens, if any are there) and a bonus Roused Crazy appears near the click. Press 2 or this card to aim; Esc or right-click to cancel."
 autowrap_mode = 2
 
 [node name="AbilityCardHolder3" type="Control" parent="UI/AbilityBar/AbilityMargin/AbilityCardRow"]

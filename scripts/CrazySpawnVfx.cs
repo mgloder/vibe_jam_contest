@@ -1,24 +1,24 @@
 using Godot;
 
 /// <summary>
-/// One-shot board-space burst at a cell, used when a civilian is converted to a <see cref="EnemyType.Crazy"/>
-/// in <see cref="GridSimulator.ConvertCiviliansInSoulWhisperRange"/>.
+/// One-shot “blood spring” in board space when a civilian becomes a <see cref="EnemyType.Crazy"/>; rect matches
+/// the colonist’s drawn body + tool bounds (see <see cref="GridSimulator.GetColonyCharacterSpriteAabbBoardPx"/>).
 /// </summary>
 public partial class CrazySpawnVfx : Node2D
 {
-	private const float SizePx = 92f;
-	private const float DurationSec = 0.52f;
+	private const float MinSizePx = 6f;
+	private const float DurationSec = 0.62f;
 	private ColorRect? _quad;
 	private ShaderMaterial? _mat;
 	private double _t;
 
-	/// <summary>Play centered on the sim cell, in <paramref name="owner"/>’s board pixel space.</summary>
-	public void Begin(GridSimulator owner, Vector2I cell)
+	/// <summary>Play on <paramref name="fromCivilian"/> (before removal) so AABB matches that frame’s art.</summary>
+	public void Begin(GridSimulator owner, ColonyCharacter fromCivilian)
 	{
 		ZIndex = 99;
 		Position = Vector2.Zero;
-		var center = owner.GetCellCenterBoardPx(cell);
-		var s = SizePx;
+		owner.GetColonyCharacterSpriteAabbBoardPx(fromCivilian, out var topLeft, out var size);
+		size = new Vector2(Mathf.Max(size.X, MinSizePx), Mathf.Max(size.Y, MinSizePx));
 		var sh = GD.Load<Shader>("res://shaders/crazy_spawn_corruption.gdshader");
 		if (sh == null)
 		{
@@ -29,8 +29,8 @@ public partial class CrazySpawnVfx : Node2D
 
 		_quad = new ColorRect
 		{
-			Position = new Vector2(center.X - s * 0.5f, center.Y - s * 0.5f),
-			Size = new Vector2(s, s),
+			Position = topLeft,
+			Size = size,
 			MouseFilter = Control.MouseFilterEnum.Ignore
 		};
 		_mat = new ShaderMaterial { Shader = sh };

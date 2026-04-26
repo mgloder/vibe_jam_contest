@@ -45,10 +45,12 @@ public partial class GridSimulator : Node2D
 	private Label? _statsLabel;
 	private Control? _topPanel;
 	private Control? _abilityBarPanel;
-	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> spawns a Servant on left click (each use adds one).</summary>
+	/// <summary>First ability card wrapper; <see cref="OnFirstAbilitySlotGuiInput"/> arms Servant placement (then map click commits).</summary>
 	private Control? _abilityCardSlot1Holder;
 	/// <summary>Second card: arm Soul Whisper; then left-click the map to convert civilians in range (or Esc / RMB to cancel).</summary>
 	private Control? _abilityCardSlot2Holder;
+	/// <summary>True after key 1 or left-click the first card, until a map click places the Servant or the player cancels.</summary>
+	private bool _servantCardTargeting;
 	/// <summary>True after key 2 or left-click the second card, until a map click completes or cancels the ability.</summary>
 	private bool _soulWhisperTargeting;
 	private ProgressBar? _currencyBar;
@@ -88,6 +90,8 @@ public partial class GridSimulator : Node2D
 	private readonly List<float> _characterMoveBudget = new();
 	/// <summary>Attack-capable colonists pause this long after a strike (no move, no attack).</summary>
 	private readonly List<float> _characterRestSecondsRemaining = new();
+	/// <summary>While Soldiers/Experts hunt the squad target, last chosen anchor for <see cref="ReplanCharacterPath"/> (same idea as <see cref="_enemyPursueCells"/>).</summary>
+	private readonly List<Vector2I> _strikerHuntPursueTargetCells = new();
 	private readonly HashSet<Vector2I> _buildingCells = new();
 	private readonly List<Rect2I> _buildingFootprints = new();
 	private bool _buildingSimEnabled;
@@ -98,7 +102,7 @@ public partial class GridSimulator : Node2D
 	private Timer _buildingRecruitExpertTimer = null!;
 	/// <summary>Suffix for display names of units spawned from building timers.</summary>
 	private int _buildingRecruitNameCounter;
-	/// <summary>While living civilians are below <see cref="CivilianReplenishMinCount"/>, spawns one per <see cref="CivilianReplenishIntervalSec"/> (see <see cref="OnCivilianReplenishTimeout"/>).</summary>
+	/// <summary>Spawns one civilian on a repeating timer: <see cref="CivilianSpawnIntervalWhenLowSec"/> if count &lt; <see cref="CivilianSpawnLowCountThreshold"/>, else <see cref="CivilianSpawnIntervalWhenHighSec"/>.</summary>
 	private Timer _civilianReplenishTimer = null!;
 	private int _civilianReplenishNameCounter;
 	private readonly Queue<Vector2I> _activeBuildingQueue = new();
@@ -163,9 +167,10 @@ public partial class GridSimulator : Node2D
 	private const int BuildingRecruitSoldierCountMinForExpert = 3;
 	private const float BuildingRecruitSoldierIntervalSec = 5f;
 	private const float BuildingRecruitExpertIntervalSec = 10f;
-	/// <summary>Spawn a new civilian on an interval when living civilian count is strictly below this (i.e. 0 or 1).</summary>
-	private const int CivilianReplenishMinCount = 2;
-	private const float CivilianReplenishIntervalSec = 3f;
+	/// <summary>While living civilians are below this, the next spawn uses <see cref="CivilianSpawnIntervalWhenLowSec"/>; at or above, <see cref="CivilianSpawnIntervalWhenHighSec"/>.</summary>
+	private const int CivilianSpawnLowCountThreshold = 5;
+	private const float CivilianSpawnIntervalWhenLowSec = 3f;
+	private const float CivilianSpawnIntervalWhenHighSec = 5f;
 	/// <summary>Tokens (currency) granted when a colonist dies, by roster type.</summary>
 	private const int TokenRewardOnCivilianDeath = 1;
 	private const int TokenRewardOnExpertDeath = 6;
@@ -333,10 +338,10 @@ public partial class GridSimulator : Node2D
 		AddChild(_buildingRecruitExpertTimer);
 		_civilianReplenishTimer = new Timer
 		{
-			WaitTime = CivilianReplenishIntervalSec,
 			OneShot = false,
 			Autostart = true
 		};
+		_civilianReplenishTimer.WaitTime = GetCivilianAutoSpawnIntervalSec();
 		_civilianReplenishTimer.Timeout += OnCivilianReplenishTimeout;
 		AddChild(_civilianReplenishTimer);
 		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
@@ -370,10 +375,10 @@ public partial class GridSimulator : Node2D
 				return;
 			}
 
-			// First ability slot: spend currency and spawn an additional Servant.
+			// First ability slot: arm Servant placement, then left-click the map to commit (6 tokens on success).
 			if (key.Keycode is Key.Key1 or Key.Kp1)
 			{
-				if (TryUseServantCard())
+				if (TryBeginOrCancelServantCardTargeting())
 					GetViewport().SetInputAsHandled();
 				return;
 			}
@@ -385,9 +390,10 @@ public partial class GridSimulator : Node2D
 				return;
 			}
 
-			if (key.Keycode == Key.Escape && _soulWhisperTargeting)
+			if (key.Keycode == Key.Escape && (_soulWhisperTargeting || _servantCardTargeting))
 			{
 				_soulWhisperTargeting = false;
+				_servantCardTargeting = false;
 				UpdateHud();
 				GetViewport().SetInputAsHandled();
 			}
@@ -396,31 +402,77 @@ public partial class GridSimulator : Node2D
 
 		if (@event is InputEventMouseButton mb && mb.Pressed)
 		{
-			if (mb.ButtonIndex == MouseButton.Right && _soulWhisperTargeting)
+			if (mb.ButtonIndex == MouseButton.Right && (_soulWhisperTargeting || _servantCardTargeting))
 			{
 				_soulWhisperTargeting = false;
+				_servantCardTargeting = false;
 				UpdateHud();
 				GetViewport().SetInputAsHandled();
 				return;
 			}
-			if (mb.ButtonIndex == MouseButton.Left && _soulWhisperTargeting
-			    && TryGetFineCellUnderGlobalMouse(out var cell))
+			if (mb.ButtonIndex == MouseButton.Left
+			    && TryGetFineCellUnderGlobalMouse(out var placeCell))
 			{
-				TryExecuteSoulWhisperOnBoard(cell);
-				GetViewport().SetInputAsHandled();
+				if (_servantCardTargeting)
+				{
+					if (TryCommitServantAtCell(placeCell))
+					{
+						GetViewport().SetInputAsHandled();
+					}
+					return;
+				}
+				if (_soulWhisperTargeting)
+				{
+					TryExecuteSoulWhisperOnBoard(placeCell);
+					GetViewport().SetInputAsHandled();
+				}
 			}
 		}
 	}
 
-	/// <summary>Pay <see cref="ServantCardCurrencyCost"/>, play lightning at the spawn cell, then add the Servant when the strike finishes.</summary>
-	private bool TryUseServantCard()
+	/// <summary>Toggle Servant aim (needs <see cref="ServantCardCurrencyCost"/> to arm). Mutually exclusive with Soul Whisper aim.</summary>
+	private bool TryBeginOrCancelServantCardTargeting()
 	{
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+			return false;
 		if (_servantLightningActive)
 			return false;
+		if (_servantCardTargeting)
+		{
+			_servantCardTargeting = false;
+			UpdateHud();
+			return true;
+		}
 		if (_playerCurrency < ServantCardCurrencyCost)
 			return false;
-		if (!TryGetNextServantSpawn(out var proto) || proto == null)
+		_soulWhisperTargeting = false;
+		_servantCardTargeting = true;
+		UpdateHud();
+		return true;
+	}
+
+	/// <summary>Pay <see cref="ServantCardCurrencyCost"/>, play lightning at the resolved spawn cell, then add the Servant when the strike finishes.</summary>
+	private bool TryCommitServantAtCell(Vector2I preferredCell)
+	{
+		if (!_servantCardTargeting)
 			return false;
+		if (_servantLightningActive)
+			return false;
+		if (_winGameSceneQueued || _gameOverSceneQueued)
+		{
+			_servantCardTargeting = false;
+			UpdateHud();
+			return false;
+		}
+		if (_playerCurrency < ServantCardCurrencyCost)
+		{
+			_servantCardTargeting = false;
+			UpdateHud();
+			return false;
+		}
+		if (!TryBuildServantProtoNearCell(preferredCell, out var proto) || proto == null)
+			return false;
+		_servantCardTargeting = false;
 		PlayerCurrency = _playerCurrency - ServantCardCurrencyCost;
 		_servantLightningActive = true;
 		StartServantLightning(proto);
@@ -434,6 +486,73 @@ public partial class GridSimulator : Node2D
 	{
 		var s = _boardPixelsPerCell;
 		return _boardGridOrigin + new Vector2((cell.X + 0.5f) * s, (cell.Y + 0.5f) * s);
+	}
+
+	/// <summary>Current board scale (pixels per sim fine cell) for VFX aligned to the grid.</summary>
+	public float GetBoardPixelsPerCell() => _boardPixelsPerCell;
+
+	/// <summary>
+	/// Pixels: axis-aligned box covering this colonist’s body + tool, same as <see cref="DrawCharacter"/> (living pose).
+	/// Used so spawn VFX matches on-screen character size.
+	/// </summary>
+	public void GetColonyCharacterSpriteAabbBoardPx(ColonyCharacter c, out Vector2 topLeftBoardPx, out Vector2 sizePx)
+	{
+		var s = _boardPixelsPerCell;
+		var ps = Mathf.Max(2f, s * 2f);
+		var cellTopLeft = _boardGridOrigin + new Vector2(c.Cell.X * s, c.Cell.Y * s);
+		var minX = float.MaxValue;
+		var maxX = float.MinValue;
+		var minY = float.MaxValue;
+		var maxY = float.MinValue;
+		var has = false;
+		for (var y = 0; y < c.SpriteRows.Length; y++)
+		{
+			var row = c.SpriteRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				if (row[x] == '.')
+					continue;
+				if (!c.Palette.TryGetValue(row[x], out _))
+					continue;
+				var ox = (x - c.SpritePivot.X) * ps;
+				var oy = (y - c.SpritePivot.Y) * ps;
+				minX = Mathf.Min(minX, ox);
+				maxX = Mathf.Max(maxX, ox + ps);
+				minY = Mathf.Min(minY, oy);
+				maxY = Mathf.Max(maxY, oy + ps);
+				has = true;
+			}
+		}
+		if (c.Tool != CharacterToolType.None)
+		{
+			for (var y = 0; y < c.ToolRows.Length; y++)
+			{
+				var row = c.ToolRows[y];
+				for (var x = 0; x < row.Length; x++)
+				{
+					if (row[x] == '.')
+						continue;
+					if (!c.ToolPalette.TryGetValue(row[x], out _))
+						continue;
+					var ox = (x - c.ToolPivot.X) * ps;
+					var oy = (y - c.ToolPivot.Y) * ps;
+					minX = Mathf.Min(minX, ox);
+					maxX = Mathf.Max(maxX, ox + ps);
+					minY = Mathf.Min(minY, oy);
+					maxY = Mathf.Max(maxY, oy + ps);
+					has = true;
+				}
+			}
+		}
+		if (!has)
+		{
+			var fallback = ps * 3f;
+			topLeftBoardPx = cellTopLeft;
+			sizePx = new Vector2(fallback, fallback);
+			return;
+		}
+		topLeftBoardPx = cellTopLeft + new Vector2(minX, minY);
+		sizePx = new Vector2(maxX - minX, maxY - minY);
 	}
 
 	/// <summary>Top edge of the terrain board in local pixels (for lightning origin).</summary>
@@ -460,18 +579,21 @@ public partial class GridSimulator : Node2D
 		QueueRedraw();
 	}
 
-	private bool TryGetNextServantSpawn(out Servant? proto)
+	/// <summary>BFS from <paramref name="preferredCell"/> to a free walkable anchor (no other ground unit, no other Servant).</summary>
+	private bool TryBuildServantProtoNearCell(Vector2I preferredCell, out Servant? proto)
 	{
 		proto = null;
 		var newIndex = _servants.Count;
-		var taken = new HashSet<Vector2I>();
-		for (var j = 0; j < _servants.Count; j++)
-			taken.Add(_servants[j].Cell);
-		var start = FindRandomValidDestinationCell(null, taken);
-		var p = Servant.CreateAt(start);
-		var cell = FindNearestCellSatisfying(start, a =>
-			IsWalkableForServantAnchorCell(p, a) && !IsCellOccupiedByOtherServant(a, newIndex));
+		var p = Servant.CreateAt(preferredCell);
+		var cell = FindNearestCellSatisfying(preferredCell, a =>
+			IsWalkableForServantAnchorCell(p, a)
+			&& !IsCellOccupiedByOtherServant(a, newIndex)
+			&& !IsCellOccupiedByAnyGroundUnit(a));
 		p.Cell = cell;
+		if (!IsWalkableForServantAnchorCell(p, cell)
+		    || IsCellOccupiedByOtherServant(cell, newIndex)
+		    || IsCellOccupiedByAnyGroundUnit(cell))
+			return false;
 		proto = p;
 		return true;
 	}
@@ -490,7 +612,7 @@ public partial class GridSimulator : Node2D
 	{
 		if (@event is not InputEventMouseButton mb || !mb.Pressed || mb.ButtonIndex != MouseButton.Left)
 			return;
-		if (TryUseServantCard())
+		if (TryBeginOrCancelServantCardTargeting())
 			_abilityCardSlot1Holder?.AcceptEvent();
 	}
 
@@ -502,7 +624,7 @@ public partial class GridSimulator : Node2D
 			_abilityCardSlot2Holder?.AcceptEvent();
 	}
 
-	/// <summary>Toggle Soul Whisper arming, or disarm. Also spawns a random <see cref="EnemyType.Crazy"/> when arming. Tokens for the area conversion are only spent on a successful map click.</summary>
+	/// <summary>Toggle Soul Whisper arming, or disarm. A bonus <see cref="EnemyType.Crazy"/> is spawned on a successful map cast (not when arming). Tokens for the area conversion are only spent on a successful map click.</summary>
 	private bool OnSoulWhisperKeyOrButton()
 	{
 		if (_winGameSceneQueued || _gameOverSceneQueued)
@@ -515,30 +637,26 @@ public partial class GridSimulator : Node2D
 		}
 		if (_playerCurrency < SoulWhisperCardCurrencyCost)
 			return false;
-		SpawnRandomCrazyOnSoulWhisperArm();
+		_servantCardTargeting = false;
 		_soulWhisperTargeting = true;
 		UpdateHud();
 		return true;
 	}
 
-	/// <summary>Instant spawn: one new Crazy on a random free walkable cell (used when second ability is armed via key 2 or card click).</summary>
-	private void SpawnRandomCrazyOnSoulWhisperArm()
+	/// <summary>Spawns a “Roused” Crazy on the first free walkable cell BFS from <paramref name="center"/> (after conversions may have changed occupancy).</summary>
+	private void TrySpawnRousedCrazyNearCell(Vector2I center)
 	{
-		const int maxTries = 200;
-		for (var t = 0; t < maxTries; t++)
-		{
-			var cell = FindRandomValidDestinationCell();
-			if (IsCellOccupiedByAnyGroundUnit(cell))
-				continue;
-			var e = EnemyCharacter.CreateByType(EnemyType.Crazy, cell, $"Roused Crazy {_rng.RandiRange(100, 999)}", null);
-			e.Destination = FindRandomValidDestinationCell(e.Cell);
-			_enemies.Add(e);
-			EnsureEnemyPathStateSize();
-			TryReplanEnemyPathWithDestinationFallback(_enemies.Count - 1);
-			RecalculateCivilianFleeDestinationsFromCurrentEnemies();
-			QueueRedraw();
+		var cell = FindNearestCellSatisfying(center, c =>
+			IsWalkableCharacterCell(c) && !IsCellOccupiedByAnyGroundUnit(c));
+		if (!IsWalkableCharacterCell(cell) || IsCellOccupiedByAnyGroundUnit(cell))
 			return;
-		}
+		var e = EnemyCharacter.CreateByType(EnemyType.Crazy, cell, $"Roused Crazy {_rng.RandiRange(100, 999)}", null);
+		e.Destination = FindRandomValidDestinationCell(e.Cell);
+		_enemies.Add(e);
+		EnsureEnemyPathStateSize();
+		TryReplanEnemyPathWithDestinationFallback(_enemies.Count - 1);
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
+		QueueRedraw();
 	}
 
 	/// <summary>Board hit test: fine sim cell under the global mouse, same space as <see cref="_boardGridOrigin"/> / <see cref="_Draw"/>.</summary>
@@ -595,6 +713,7 @@ public partial class GridSimulator : Node2D
 			return;
 		PlayerCurrency = _playerCurrency - SoulWhisperCardCurrencyCost;
 		ConvertCiviliansInSoulWhisperRange(center);
+		TrySpawnRousedCrazyNearCell(center);
 		_soulWhisperTargeting = false;
 		UpdateHud();
 		QueueRedraw();
@@ -614,7 +733,7 @@ public partial class GridSimulator : Node2D
 			var label = ch.DisplayName;
 			var vfx = new CrazySpawnVfx();
 			AddChild(vfx);
-			vfx.Begin(this, cell);
+			vfx.Begin(this, ch);
 			_characters.RemoveAt(i);
 			_characterPathQueues.RemoveAt(i);
 			_characterMoveBudget.RemoveAt(i);
@@ -1069,10 +1188,12 @@ public partial class GridSimulator : Node2D
 		{
 			var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
 			var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
-			var soul = _soulWhisperTargeting
-				? " | Soul Whisper: left-click the map to cast (empty click keeps aim; Esc / right-click to cancel)"
-				: "";
-			_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}{soul}";
+			var aimHelp = _servantCardTargeting
+				? " | Servant: left-click the map to place (invalid click keeps aim; Esc / right-click to cancel)"
+				: _soulWhisperTargeting
+					? " | Soul Whisper: left-click the map to cast (empty click keeps aim; Esc / right-click to cancel)"
+					: "";
+			_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}{aimHelp}";
 		}
 		if (_statsLabel != null)
 		{
@@ -1838,6 +1959,7 @@ public partial class GridSimulator : Node2D
 			_characterPathQueues.Add(new Queue<Vector2I>());
 			_characterMoveBudget.Add(0f);
 			_characterRestSecondsRemaining.Add(0f);
+			_strikerHuntPursueTargetCells.Add(EnemyPursueNone);
 		}
 
 		while (_characterPathQueues.Count > _characters.Count)
@@ -1845,6 +1967,7 @@ public partial class GridSimulator : Node2D
 			_characterPathQueues.RemoveAt(_characterPathQueues.Count - 1);
 			_characterMoveBudget.RemoveAt(_characterMoveBudget.Count - 1);
 			_characterRestSecondsRemaining.RemoveAt(_characterRestSecondsRemaining.Count - 1);
+			_strikerHuntPursueTargetCells.RemoveAt(_strikerHuntPursueTargetCells.Count - 1);
 		}
 	}
 
@@ -1958,8 +2081,33 @@ public partial class GridSimulator : Node2D
 			if (_characterRestSecondsRemaining[i] > 0f)
 				continue;
 
+			var huntCell = default(Vector2I);
+			var isHuntingSquad = character.Type is ColonyCharacterType.Expert or ColonyCharacterType.Soldier
+			                     && TryGetSquadHuntTargetCellForStrikers(out huntCell);
+			if (isHuntingSquad)
+			{
+				character.Destination = ClampToGridBounds(huntCell);
+				if (pathQueue.Count == 0 || _strikerHuntPursueTargetCells[i] != huntCell)
+				{
+					_strikerHuntPursueTargetCells[i] = huntCell;
+					if (!ReplanCharacterPath(i))
+						TryReplanPathWithDestinationFallback(i);
+				}
+			}
+			else
+			{
+				if (i < _strikerHuntPursueTargetCells.Count)
+					_strikerHuntPursueTargetCells[i] = EnemyPursueNone;
+			}
+
 			if (character.Cell == character.Destination)
 			{
+				if (isHuntingSquad)
+				{
+					if (!ReplanCharacterPath(i))
+						TryReplanPathWithDestinationFallback(i);
+					continue;
+				}
 				character.Destination = FindNewDestinationAfterArrival(character);
 				TryReplanPathWithDestinationFallback(i);
 				continue;
@@ -2434,6 +2582,81 @@ public partial class GridSimulator : Node2D
 			? FindCivilianFleeDestination(c, c.Cell, BuildReservedCivilianDestinationsExcluding(c))
 			: FindRandomValidDestinationCell(c.Cell);
 
+	/// <summary>True if at least one Servant is alive (unlocks coordinated striker movement).</summary>
+	private bool HasAnyLivingServant()
+	{
+		for (var s = 0; s < _servants.Count; s++)
+		{
+			if (_servants[s].Health > 0)
+				return true;
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Picks a single anchor for all Soldiers/Experts to path toward: the living Servant or enemy whose cell is
+	/// closest to the squad centroid, so the group converges. Requires a living Servant on the map and at least
+	/// one living Soldier or Expert. Servants are considered before enemies when distances tie.
+	/// </summary>
+	private bool TryGetSquadHuntTargetCellForStrikers(out Vector2I cell)
+	{
+		cell = default;
+		if (!HasAnyLivingServant())
+			return false;
+		var n = 0;
+		long sumX = 0;
+		long sumY = 0;
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (!c.IsAlive)
+				continue;
+			if (c.Type is not (ColonyCharacterType.Expert or ColonyCharacterType.Soldier))
+				continue;
+			sumX += c.Cell.X;
+			sumY += c.Cell.Y;
+			n++;
+		}
+		if (n == 0)
+			return false;
+		var cx = (int)Mathf.Round((float)sumX / n);
+		var cy = (int)Mathf.Round((float)sumY / n);
+		var centroid = ClampToGridBounds(new Vector2I(cx, cy));
+		var bestD = int.MaxValue;
+		var best = centroid;
+		var found = false;
+		for (var si = 0; si < _servants.Count; si++)
+		{
+			if (_servants[si].Health <= 0)
+				continue;
+			var t = _servants[si].Cell;
+			var d = ManhattanDistance(centroid, t);
+			if (d < bestD)
+			{
+				bestD = d;
+				best = t;
+				found = true;
+			}
+		}
+		for (var ei = 0; ei < _enemies.Count; ei++)
+		{
+			if (!_enemies[ei].IsAlive)
+				continue;
+			var t = _enemies[ei].Cell;
+			var d = ManhattanDistance(centroid, t);
+			if (d < bestD)
+			{
+				bestD = d;
+				best = t;
+				found = true;
+			}
+		}
+		if (!found)
+			return false;
+		cell = best;
+		return true;
+	}
+
 	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
 		Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y);
 
@@ -2611,25 +2834,34 @@ public partial class GridSimulator : Node2D
 		TrySpawnFromRandomBuilding(ColonyCharacterType.Expert, "Hired Expert");
 	}
 
+	/// <summary>3s between spawns if population &lt; 5, otherwise 5s; always enqueues the next after this fire.</summary>
+	private float GetCivilianAutoSpawnIntervalSec() =>
+		CountLivingColonyType(ColonyCharacterType.Civilian) < CivilianSpawnLowCountThreshold
+			? CivilianSpawnIntervalWhenLowSec
+			: CivilianSpawnIntervalWhenHighSec;
+
 	private void OnCivilianReplenishTimeout()
 	{
 		if (_winGameSceneQueued || _gameOverSceneQueued)
-			return;
-		if (CountLivingColonyType(ColonyCharacterType.Civilian) >= CivilianReplenishMinCount)
-			return;
-		if (!TryFindSpawnCellForReplenishCivilian(out var cell))
-			return;
-		_civilianReplenishNameCounter++;
-		var c = ColonyCharacter.CreateByType(ColonyCharacterType.Civilian, cell, $"Settler {_civilianReplenishNameCounter}", null);
-		_characters.Add(c);
-		EnsurePathStateSize();
-		AssignUniqueCivilianFleeDestinationsInOrder();
-		for (var j = 0; j < _characters.Count; j++)
 		{
-			if (_characters[j].IsAlive)
-				TryReplanPathWithDestinationFallback(j);
+			_civilianReplenishTimer.WaitTime = GetCivilianAutoSpawnIntervalSec();
+			return;
 		}
-		QueueRedraw();
+		if (TryFindSpawnCellForReplenishCivilian(out var cell))
+		{
+			_civilianReplenishNameCounter++;
+			var c = ColonyCharacter.CreateByType(ColonyCharacterType.Civilian, cell, $"Settler {_civilianReplenishNameCounter}", null);
+			_characters.Add(c);
+			EnsurePathStateSize();
+			AssignUniqueCivilianFleeDestinationsInOrder();
+			for (var j = 0; j < _characters.Count; j++)
+			{
+				if (_characters[j].IsAlive)
+					TryReplanPathWithDestinationFallback(j);
+			}
+			QueueRedraw();
+		}
+		_civilianReplenishTimer.WaitTime = GetCivilianAutoSpawnIntervalSec();
 	}
 
 	/// <summary>Random unoccupied walkable cell for a new civilian (same rules as other ground units).</summary>
