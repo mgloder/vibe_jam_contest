@@ -35,7 +35,7 @@ color = Color(0.0470588, 0.0588235, 0.0862745, 1)
 offset_left = 22.0
 offset_top = 18.0
 offset_right = 692.0
-offset_bottom = 130.0
+offset_bottom = 188.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 
 [node name="TopMargin" type="MarginContainer" parent="UI/TopPanel"]
@@ -68,6 +68,47 @@ theme_override_colors/font_color = Color(0.65098, 0.733333, 0.878431, 1)
 theme_override_font_sizes/font_size = 15
 text = "Grid: 960x540  |  Cell: 1px"
 
+[node name="RandomizeCharacterButton" type="Button" parent="UI/TopPanel/TopMargin/TopVBox" unique_id=204267713]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(260, 42)
+layout_mode = 2
+text = "Randomize Character"
+
+[node name="ControlPanel" type="PanelContainer" parent="UI"]
+offset_left = 710.0
+offset_top = 18.0
+offset_right = 1020.0
+offset_bottom = 188.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="ControlMargin" type="MarginContainer" parent="UI/ControlPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 14
+
+[node name="ControlVBox" type="VBoxContainer" parent="UI/ControlPanel/ControlMargin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="ControlTitle" type="Label" parent="UI/ControlPanel/ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Character Control"
+
+[node name="ShowCharacterButton" type="Button" parent="UI/ControlPanel/ControlMargin/ControlVBox" unique_id=614502299]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "Show Character"
+
+[node name="RemoveCharacterButton" type="Button" parent="UI/ControlPanel/ControlMargin/ControlVBox" unique_id=1468763327]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+text = "Remove Character"
+
 [node name="HelpLabel" type="Label" parent="UI"]
 anchors_preset = 7
 anchor_left = 0.5
@@ -82,5 +123,5 @@ grow_horizontal = 2
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.619608, 0.690196, 0.823529, 1)
 theme_override_font_sizes/font_size = 15
-text = "RimWorld-style foundation phase: board only for now (press R to refresh)."
+text = "Use the control panel to show/remove NPC and randomize its look."
 horizontal_alignment = 1

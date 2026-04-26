@@ -13,12 +13,24 @@ public partial class GridSimulator : Node2D
 
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
+	private Button _randomizeCharacterButton = null!;
+	private Button _showCharacterButton = null!;
+	private Button _removeCharacterButton = null!;
 	private ColonyCharacter _firstNpc = null!;
+	private readonly RandomNumberGenerator _rng = new();
+	private bool _isCharacterVisible = true;
 
 	public override void _Ready()
 	{
+		_rng.Randomize();
 		_statusLabel = GetNode<Label>("%StatusLabel");
 		_statsLabel = GetNode<Label>("%StatsLabel");
+		_randomizeCharacterButton = GetNode<Button>("%RandomizeCharacterButton");
+		_showCharacterButton = GetNode<Button>("%ShowCharacterButton");
+		_removeCharacterButton = GetNode<Button>("%RemoveCharacterButton");
+		_randomizeCharacterButton.Pressed += OnRandomizeCharacterPressed;
+		_showCharacterButton.Pressed += OnShowCharacterPressed;
+		_removeCharacterButton.Pressed += OnRemoveCharacterPressed;
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
 		UpdateHud();
@@ -76,7 +88,8 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
-		DrawFirstNpc(origin);
+		if (_isCharacterVisible)
+			DrawFirstNpc(origin);
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
 	}
 
@@ -117,7 +130,32 @@ public partial class GridSimulator : Node2D
 
 	private void UpdateHud()
 	{
-		_statusLabel.Text = "RimWorld-style scaffold with first NPC";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  Press R to redraw";
+		_statusLabel.Text = "Character simulator scaffold";
+		var visibility = _isCharacterVisible ? "Shown" : "Removed";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  State: {visibility}";
+		_showCharacterButton.Disabled = _isCharacterVisible;
+		_removeCharacterButton.Disabled = !_isCharacterVisible;
+		_randomizeCharacterButton.Disabled = !_isCharacterVisible;
+	}
+
+	private void OnRandomizeCharacterPressed()
+	{
+		_firstNpc = ColonyCharacter.CreateRandomized(_firstNpc.Cell, _rng);
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private void OnShowCharacterPressed()
+	{
+		_isCharacterVisible = true;
+		UpdateHud();
+		QueueRedraw();
+	}
+
+	private void OnRemoveCharacterPressed()
+	{
+		_isCharacterVisible = false;
+		UpdateHud();
+		QueueRedraw();
 	}
 }
