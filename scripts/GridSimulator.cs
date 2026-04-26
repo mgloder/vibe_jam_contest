@@ -132,6 +132,8 @@ public partial class GridSimulator : Node2D
 	private const string ServantKillRoarSfxPath = "res://scenes/music/monster_roars.mp3";
 	private const string ServantDeathSfxPath = "res://scenes/music/monsterdeathscream.mp3";
 	private const string CivilianMassScreamSfxPath = "res://scenes/music/Massscreams.mp3";
+	private const string ColonyStrikerGunshotSfxPath = "res://scenes/music/Gunshots.mp3";
+	private const string ServantSummonSfxPath = "res://scenes/music/Summonmonsters.mp3";
 	/// <summary>True after lose condition: queue <see cref="GameOverScenePath"/> (see <see cref="TryTriggerGameOver"/>).</summary>
 	private bool _gameOverSceneQueued;
 	/// <summary>True when victory is queued; blocks game over in the same run.</summary>
@@ -177,6 +179,8 @@ public partial class GridSimulator : Node2D
 	private AudioStreamPlayer? _servantKillRoarSfx;
 	private AudioStreamPlayer? _servantDeathSfx;
 	private AudioStreamPlayer? _civilianMassScreamSfx;
+	private AudioStreamPlayer? _colonyStrikerGunshotSfx;
+	private AudioStreamPlayer? _servantSummonSfx;
 
 	public override void _Ready()
 	{
@@ -252,6 +256,30 @@ public partial class GridSimulator : Node2D
 				Bus = "Master"
 			};
 			AddChild(_civilianMassScreamSfx);
+		}
+
+		var gunshots = ResourceLoader.Load<AudioStream>(ColonyStrikerGunshotSfxPath);
+		if (gunshots != null)
+		{
+			_colonyStrikerGunshotSfx = new AudioStreamPlayer
+			{
+				Stream = gunshots,
+				VolumeDb = -2f,
+				Bus = "Master"
+			};
+			AddChild(_colonyStrikerGunshotSfx);
+		}
+
+		var summon = ResourceLoader.Load<AudioStream>(ServantSummonSfxPath);
+		if (summon != null)
+		{
+			_servantSummonSfx = new AudioStreamPlayer
+			{
+				Stream = summon,
+				VolumeDb = -1f,
+				Bus = "Master"
+			};
+			AddChild(_servantSummonSfx);
 		}
 
 		InitializeStartingCharacters();
@@ -390,6 +418,7 @@ public partial class GridSimulator : Node2D
 
 	private void CommitServantFromLightning(Servant proto)
 	{
+		_servantSummonSfx?.Play();
 		_servants.Add(proto);
 		_servantPathQueues.Add(new Queue<Vector2I>());
 		_servantMoveBudget.Add(0f);
@@ -1984,7 +2013,11 @@ public partial class GridSimulator : Node2D
 				}
 			}
 			if (hits > 0)
+			{
+				if (a.Type is ColonyCharacterType.Expert or ColonyCharacterType.Soldier)
+					_colonyStrikerGunshotSfx?.Play();
 				_characterRestSecondsRemaining[ai] = PostAttackStopSec;
+			}
 		}
 	}
 
