@@ -47,6 +47,7 @@ public partial class GridSimulator : Node2D
 		_controlPanel = GetNode<GridControlPanel>("%ControlPanel");
 		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
 		_controlPanel.BuildingSimulatorRequested += OnOpenBuildingSimulatorPressed;
+		_controlPanel.GenerateTerrainRequested += OnGenerateTerrainPressed;
 		_controlPanel.BuildingExpandSizeChanged += OnBuildingExpandSizeChanged;
 		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
 		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
@@ -265,6 +266,12 @@ public partial class GridSimulator : Node2D
 		BuildingGrowthPerTick = Mathf.Clamp(BuildingGrowthPerTick + delta, 1, 64);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		UpdateHud();
+	}
+
+	private void OnGenerateTerrainPressed()
+	{
+		TerrainSystem.InitializeRandom(_terrain, _rng);
+		QueueRedraw();
 	}
 
 	private void OnShowCharacterPressed()

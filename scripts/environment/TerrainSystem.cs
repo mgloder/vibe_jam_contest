@@ -23,6 +23,28 @@ public static class TerrainSystem
 		}
 	}
 
+	public static void InitializeRandom(TerrainType[,] terrain, RandomNumberGenerator rng)
+	{
+		var width = terrain.GetLength(0);
+		var height = terrain.GetLength(1);
+
+		for (var y = 0; y < height; y++)
+		{
+			for (var x = 0; x < width; x++)
+			{
+				var roll = rng.Randf();
+				if (roll < 0.52f)
+					terrain[x, y] = TerrainType.Grass;
+				else if (roll < 0.75f)
+					terrain[x, y] = TerrainType.Forest;
+				else if (roll < 0.90f)
+					terrain[x, y] = TerrainType.Mountain;
+				else
+					terrain[x, y] = TerrainType.Water;
+			}
+		}
+	}
+
 	public static Color TerrainToColor(TerrainType terrain, int x, int y)
 	{
 		var checker = ((x + y) & 1) == 0;

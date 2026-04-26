@@ -99,6 +99,12 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 14
 text = "Terrain"
 
+[node name="GenerateTerrainButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1264839912]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Generate Terrain"
+
 [node name="GrassButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=170639252]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)

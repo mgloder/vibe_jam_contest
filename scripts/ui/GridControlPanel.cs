@@ -15,6 +15,7 @@ public partial class GridControlPanel : PanelContainer
 	public event Action? ShowCharacterRequested;
 	public event Action? RemoveCharacterRequested;
 	public event Action? BuildingSimulatorRequested;
+	public event Action? GenerateTerrainRequested;
 	public event Action<int>? BuildingExpandSizeChanged;
 	public event Action<TerrainType>? TerrainSelected;
 
@@ -22,6 +23,7 @@ public partial class GridControlPanel : PanelContainer
 	{
 		var randomizeButton = GetNode<Button>("%RandomizeCharacterButton");
 		var buildingButton = GetNode<Button>("%OpenBuildingSimulatorButton");
+		var generateTerrainButton = GetNode<Button>("%GenerateTerrainButton");
 		_showCharacterButton = GetNode<Button>("%ShowCharacterButton");
 		_removeCharacterButton = GetNode<Button>("%RemoveCharacterButton");
 		var expandSizeDownButton = GetNode<Button>("%ExpandSizeDownButton");
@@ -34,6 +36,7 @@ public partial class GridControlPanel : PanelContainer
 
 		randomizeButton.Pressed += () => RandomizeCharacterRequested?.Invoke();
 		buildingButton.Pressed += () => BuildingSimulatorRequested?.Invoke();
+		generateTerrainButton.Pressed += () => GenerateTerrainRequested?.Invoke();
 		_showCharacterButton.Pressed += () => ShowCharacterRequested?.Invoke();
 		_removeCharacterButton.Pressed += () => RemoveCharacterRequested?.Invoke();
 		expandSizeDownButton.Pressed += () => BuildingExpandSizeChanged?.Invoke(-1);
