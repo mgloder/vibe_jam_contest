@@ -146,12 +146,6 @@ custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 text = "Forest"
 
-[node name="MountainButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=665952575]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 26)
-layout_mode = 2
-text = "Mountain"
-
 [node name="WaterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=68489190]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)

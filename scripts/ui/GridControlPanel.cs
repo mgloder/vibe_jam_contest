@@ -7,7 +7,6 @@ public partial class GridControlPanel : PanelContainer
 	private Button _removeCharacterButton = null!;
 	private Button _grassButton = null!;
 	private Button _forestButton = null!;
-	private Button _mountainButton = null!;
 	private Button _waterButton = null!;
 	private Label _expandSizeValueLabel = null!;
 	private Label _terrainSmoothnessValueLabel = null!;
@@ -35,7 +34,6 @@ public partial class GridControlPanel : PanelContainer
 		_terrainSmoothnessValueLabel = GetNode<Label>("%TerrainSmoothnessValueLabel");
 		_grassButton = GetNode<Button>("%GrassButton");
 		_forestButton = GetNode<Button>("%ForestButton");
-		_mountainButton = GetNode<Button>("%MountainButton");
 		_waterButton = GetNode<Button>("%WaterButton");
 
 		randomizeButton.Pressed += () => RandomizeCharacterRequested?.Invoke();
@@ -48,7 +46,6 @@ public partial class GridControlPanel : PanelContainer
 		terrainSmoothnessSlider.ValueChanged += value => TerrainSmoothnessChanged?.Invoke((float)value);
 		_grassButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Grass);
 		_forestButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Forest);
-		_mountainButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Mountain);
 		_waterButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Water);
 	}
 

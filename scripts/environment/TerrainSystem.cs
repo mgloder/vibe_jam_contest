@@ -6,7 +6,6 @@ public enum TerrainType
 	None,
 	Grass,
 	Forest,
-	Mountain,
 	Water
 }
 
@@ -38,12 +37,11 @@ public static class TerrainSystem
 				terrain[x, y] = TerrainType.Grass;
 		}
 
-		// 2) Independent natural terrains: tuned to reduce water and boost mountain.
+		// 2) Independent natural terrains.
 		PaintGaussianBlobs(terrain, rng, TerrainType.Water, blobCount: 10, minRadius: maxDim * 0.02f, maxRadius: maxDim * 0.055f, replaceFilter: TerrainType.Grass, smoothness: smooth);
-		PaintGaussianBlobs(terrain, rng, TerrainType.Mountain, blobCount: 30, minRadius: maxDim * 0.03f, maxRadius: maxDim * 0.082f, replaceFilter: TerrainType.Grass, smoothness: smooth);
 
-		// 3) Forests: only on grass.
-		PaintGaussianBlobs(terrain, rng, TerrainType.Forest, blobCount: 20, minRadius: maxDim * 0.02f, maxRadius: maxDim * 0.048f, replaceFilter: TerrainType.Grass, smoothness: smooth);
+		// 3) Forests: only on grass (includes prior mountain share).
+		PaintGaussianBlobs(terrain, rng, TerrainType.Forest, blobCount: 50, minRadius: maxDim * 0.02f, maxRadius: maxDim * 0.082f, replaceFilter: TerrainType.Grass, smoothness: smooth);
 		var smoothPasses = 1 + Mathf.RoundToInt(smooth * 8f); // 1..9 passes
 		SmoothNaturalAdjacency(terrain, passes: smoothPasses);
 
@@ -57,7 +55,6 @@ public static class TerrainSystem
 			TerrainType.None => checker ? new Color(0.13f, 0.15f, 0.21f) : new Color(0.11f, 0.13f, 0.18f),
 			TerrainType.Grass => checker ? new Color(0.22f, 0.36f, 0.20f) : new Color(0.20f, 0.33f, 0.18f),
 			TerrainType.Forest => checker ? new Color(0.11f, 0.25f, 0.13f) : new Color(0.09f, 0.22f, 0.11f),
-			TerrainType.Mountain => checker ? new Color(0.38f, 0.40f, 0.42f) : new Color(0.33f, 0.35f, 0.37f),
 			TerrainType.Water => checker ? new Color(0.14f, 0.29f, 0.49f) : new Color(0.12f, 0.25f, 0.43f),
 			_ => new Color(0.2f, 0.2f, 0.2f)
 		};
@@ -182,7 +179,7 @@ public static class TerrainSystem
 
 	private static bool IsNatural(TerrainType t)
 	{
-		return t == TerrainType.Grass || t == TerrainType.Forest || t == TerrainType.Mountain || t == TerrainType.Water;
+		return t == TerrainType.Grass || t == TerrainType.Forest || t == TerrainType.Water;
 	}
 
 	private static int CountNeighborsOfType(TerrainType[,] terrain, int x, int y, TerrainType target)
@@ -212,11 +209,9 @@ public static class TerrainSystem
 	{
 		var grass = CountNeighborsOfType(terrain, x, y, TerrainType.Grass);
 		var forest = CountNeighborsOfType(terrain, x, y, TerrainType.Forest);
-		var mountain = CountNeighborsOfType(terrain, x, y, TerrainType.Mountain);
 		var water = CountNeighborsOfType(terrain, x, y, TerrainType.Water);
 
-		// Slight weighting bias to encourage more mountain and less water during smoothing.
-		var mountainWeighted = mountain + 1;
+		// Keep water slightly constrained during smoothing.
 		var waterWeighted = Mathf.Max(0, water - 1);
 
 		var max = grass;
@@ -225,11 +220,6 @@ public static class TerrainSystem
 		{
 			max = forest;
 			type = TerrainType.Forest;
-		}
-		if (mountainWeighted > max)
-		{
-			max = mountainWeighted;
-			type = TerrainType.Mountain;
 		}
 		if (waterWeighted > max)
 		{

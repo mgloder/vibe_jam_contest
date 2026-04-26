@@ -395,15 +395,6 @@ public partial class GridSimulator : Node2D
 
 	private void RemoveAllBuildingsFromBoard()
 	{
-		for (var y = 0; y < GridHeight; y++)
-		{
-			for (var x = 0; x < GridWidth; x++)
-			{
-				if (_terrain[x, y] == TerrainType.Mountain)
-					_terrain[x, y] = TerrainType.Grass;
-			}
-		}
-
 		_buildingCells.Clear();
 		_activeBuildingQueue.Clear();
 		_hasActiveBuildingProject = false;
