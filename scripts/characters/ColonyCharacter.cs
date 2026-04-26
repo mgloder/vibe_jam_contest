@@ -2,11 +2,21 @@ using Godot;
 using System;
 using System.Collections.Generic;
 
+public enum ColonyCharacterVisualType
+{
+	PixelBody,
+	TextureSprite
+}
+
 public sealed class ColonyCharacter
 {
 	public string Id { get; }
 	public string DisplayName { get; set; }
 	public Vector2I Cell { get; set; }
+	public ColonyCharacterVisualType VisualType { get; }
+	public string TexturePath { get; }
+	public float TextureTargetHeightPx { get; }
+	public Vector2 TextureAnchor { get; }
 	public string[] SpriteRows { get; }
 	public Vector2I SpritePivot { get; }
 	public IReadOnlyDictionary<char, Color> Palette { get; }
@@ -15,6 +25,10 @@ public sealed class ColonyCharacter
 		string id,
 		string displayName,
 		Vector2I cell,
+		ColonyCharacterVisualType visualType,
+		string texturePath,
+		float textureTargetHeightPx,
+		Vector2 textureAnchor,
 		string[] spriteRows,
 		Vector2I spritePivot,
 		IReadOnlyDictionary<char, Color> palette
@@ -23,6 +37,10 @@ public sealed class ColonyCharacter
 		Id = id;
 		DisplayName = displayName;
 		Cell = cell;
+		VisualType = visualType;
+		TexturePath = texturePath;
+		TextureTargetHeightPx = textureTargetHeightPx;
+		TextureAnchor = textureAnchor;
 		SpriteRows = spriteRows;
 		SpritePivot = spritePivot;
 		Palette = palette;
@@ -30,35 +48,22 @@ public sealed class ColonyCharacter
 
 	public static ColonyCharacter CreateStarter(Vector2I cell)
 	{
-		var spriteRows = new[]
-		{
-			"..GGG..",
-			".GSSSG.",
-			".GSSSG.",
-			"..BBB..",
-			".BBTBB.",
-			".BBTBB.",
-			"..LLL..",
-			".L...L.",
-			"L.....L"
-		};
+		return CreateSoldier(cell);
+	}
 
-		var palette = new Dictionary<char, Color>
-		{
-			['G'] = new Color(0.16f, 0.17f, 0.20f), // hair/outline
-			['S'] = new Color(0.95f, 0.81f, 0.68f), // skin
-			['B'] = new Color(0.38f, 0.66f, 0.96f), // shirt
-			['T'] = new Color(0.10f, 0.14f, 0.22f), // belt/shadow
-			['L'] = new Color(0.30f, 0.35f, 0.43f)  // legs
-		};
-
+	public static ColonyCharacter CreateSoldier(Vector2I cell)
+	{
 		return new ColonyCharacter(
 			id: "starter-colonist-001",
-			displayName: "Starter Colonist",
+			displayName: "Soldier",
 			cell: cell,
-			spriteRows: spriteRows,
+			visualType: ColonyCharacterVisualType.TextureSprite,
+			texturePath: "res://sprites/sample_s.png",
+			textureTargetHeightPx: 150f,
+			textureAnchor: new Vector2(0.5f, 0.6f),
+			spriteRows: Array.Empty<string>(),
 			spritePivot: new Vector2I(3, 4),
-			palette: palette
+			palette: new Dictionary<char, Color>()
 		);
 	}
 
@@ -155,6 +160,10 @@ public sealed class ColonyCharacter
 			id: Guid.NewGuid().ToString("N"),
 			displayName: name,
 			cell: cell,
+			visualType: ColonyCharacterVisualType.PixelBody,
+			texturePath: string.Empty,
+			textureTargetHeightPx: 0f,
+			textureAnchor: new Vector2(0.5f, 0.6f),
 			spriteRows: chosenSprite,
 			spritePivot: new Vector2I(3, 4),
 			palette: chosenPalette

@@ -16,7 +16,7 @@ public partial class GridSimulator : Node2D
 	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private ColonyCharacter _firstNpc = null!;
-	private Texture2D? _soldierTexture;
+	private Texture2D? _firstNpcTexture;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType _selectedTerrain = TerrainType.Grass;
@@ -40,7 +40,7 @@ public partial class GridSimulator : Node2D
 
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
-		_soldierTexture = GD.Load<Texture2D>("res://sprites/sample_s.png");
+		RefreshCharacterVisualCache();
 		UpdateHud();
 	}
 
@@ -112,9 +112,9 @@ public partial class GridSimulator : Node2D
 	private void DrawFirstNpc(Vector2 gridOrigin)
 	{
 		var cellTopLeft = gridOrigin + new Vector2(_firstNpc.Cell.X * CellSize, _firstNpc.Cell.Y * CellSize);
-		if (_soldierTexture is not null)
+		if (_firstNpc.VisualType == ColonyCharacterVisualType.TextureSprite && _firstNpcTexture is not null)
 		{
-			DrawSoldierTexture(cellTopLeft, _soldierTexture);
+			DrawCharacterTexture(cellTopLeft, _firstNpcTexture);
 			return;
 		}
 
@@ -140,19 +140,19 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	private void DrawSoldierTexture(Vector2 cellTopLeft, Texture2D texture)
+	private void DrawCharacterTexture(Vector2 cellTopLeft, Texture2D texture)
 	{
 		var textureSize = texture.GetSize();
 		if (textureSize.X <= 0f || textureSize.Y <= 0f)
 			return;
 
-		// Keep soldier readable at tiny grid cells while preserving sprite proportions.
-		var targetHeight = Mathf.Max(CellSize * 64f, 120f);
+		// Keep character readable at tiny grid cells while preserving sprite proportions.
+		var targetHeight = Mathf.Max(CellSize * 64f, _firstNpc.TextureTargetHeightPx);
 		var scale = targetHeight / textureSize.Y;
 		var drawSize = textureSize * scale;
 
-		// Anchor roughly at character center so it stands on the selected tile area.
-		var drawPos = cellTopLeft - new Vector2(drawSize.X * 0.5f, drawSize.Y * 0.6f);
+		// Anchor texture around the actor's tile center.
+		var drawPos = cellTopLeft - new Vector2(drawSize.X * _firstNpc.TextureAnchor.X, drawSize.Y * _firstNpc.TextureAnchor.Y);
 		DrawTextureRect(texture, new Rect2(drawPos, drawSize), false);
 	}
 
@@ -196,6 +196,7 @@ public partial class GridSimulator : Node2D
 	private void OnRandomizeCharacterPressed()
 	{
 		_firstNpc = ColonyCharacter.CreateRandomized(_firstNpc.Cell, _rng);
+		RefreshCharacterVisualCache();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -237,6 +238,16 @@ public partial class GridSimulator : Node2D
 
 		_terrain[x, y] = _selectedTerrain;
 		QueueRedraw();
+	}
+
+	private void RefreshCharacterVisualCache()
+	{
+		_firstNpcTexture = null;
+		if (_firstNpc.VisualType != ColonyCharacterVisualType.TextureSprite)
+			return;
+		if (string.IsNullOrWhiteSpace(_firstNpc.TexturePath))
+			return;
+		_firstNpcTexture = GD.Load<Texture2D>(_firstNpc.TexturePath);
 	}
 
 }
