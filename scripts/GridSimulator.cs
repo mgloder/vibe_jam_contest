@@ -30,6 +30,9 @@ public partial class GridSimulator : Node2D
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
+	private float _characterMoveAccumulatorSec;
+	private readonly List<Queue<Vector2I>> _characterPathQueues = new();
+	private readonly List<float> _characterMoveBudget = new();
 	private readonly HashSet<Vector2I> _buildingCells = new();
 	private readonly List<Rect2I> _buildingFootprints = new();
 	private bool _buildingSimEnabled;
@@ -43,6 +46,15 @@ public partial class GridSimulator : Node2D
 	private Texture2D _buildingTexture = null!;
 	private const int BuildingSizeMultiplier = 2;
 	private const int MinGridLineStepCells = 10;
+	/// <summary>Seconds between path-movement ticks. Each tick adds <see cref="MovementBudgetPerGridMajorStep"/> to spend on cells.</summary>
+	private const float CharacterMoveStepSec = 0.5f;
+	/// <summary>
+	/// Budget units added each tick, aligned to the major grid: enough to cross one 10-cell span
+	/// on default-cost terrain in one tick (flat ground uses 1 unit per cell; forest uses 2).
+	/// </summary>
+	private const int MovementBudgetPerGridMajorStep = MinGridLineStepCells;
+	private const int DefaultTerrainMoveCost = 1;
+	private const int ForestTerrainMoveCost = 2; // 0.5x speed
 
 	public override void _Ready()
 	{
@@ -72,6 +84,11 @@ public partial class GridSimulator : Node2D
 		InitializeStartingCharacters();
 		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
 		GenerateRandomBuildingsAfterTerrain(2);
+		RelocateCharactersToWalkableGround();
+		EnsureCharacterDestinationsAreValid();
+		EnsurePathStateSize();
+		for (var pi = 0; pi < _characters.Count; pi++)
+			TryReplanPathWithDestinationFallback(pi);
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		UpdateHud();
@@ -89,6 +106,22 @@ public partial class GridSimulator : Node2D
 			UpdateHud();
 			GetViewport().SetInputAsHandled();
 		}
+	}
+
+	public override void _Process(double delta)
+	{
+		_characterMoveAccumulatorSec += (float)delta;
+		if (_characterMoveAccumulatorSec < CharacterMoveStepSec)
+			return;
+
+		while (_characterMoveAccumulatorSec >= CharacterMoveStepSec)
+		{
+			_characterMoveAccumulatorSec -= CharacterMoveStepSec;
+			StepCharactersTowardDestination();
+		}
+
+		UpdateHud();
+		QueueRedraw();
 	}
 
 	public override void _Draw()
@@ -115,7 +148,7 @@ public partial class GridSimulator : Node2D
 		DrawBuildingSprites(origin);
 
 		var gridStep = Mathf.Max(MinGridLineStepCells, 1);
-		var lineColor = new Color(0.52f, 0.52f, 0.52f, 0.62f); // darker light gray
+		var lineColor = new Color(0.28f, 0.28f, 0.30f, 0.78f);
 		for (var x = 0; x <= GridWidth; x += gridStep)
 		{
 			var xPos = origin.X + x * CellSize;
@@ -250,6 +283,9 @@ public partial class GridSimulator : Node2D
 			var current = _characters[i];
 			_characters[i] = ColonyCharacter.CreateByType(current.Type, current.Cell, current.DisplayName, current.Destination);
 		}
+		EnsurePathStateSize();
+		for (var ri = 0; ri < _characters.Count; ri++)
+			TryReplanPathWithDestinationFallback(ri);
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -280,9 +316,13 @@ public partial class GridSimulator : Node2D
 	private void OnGenerateTerrainPressed()
 	{
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
-		RelocateCharactersOffWater();
-		EnsureCharacterDestinationsAreValid();
+		RelocateCharactersToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
+		RelocateCharactersToWalkableGround();
+		EnsureCharacterDestinationsAreValid();
+		EnsurePathStateSize();
+		for (var pi = 0; pi < _characters.Count; pi++)
+			TryReplanPathWithDestinationFallback(pi);
 		QueueRedraw();
 	}
 
@@ -297,6 +337,9 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
+		EnsurePathStateSize();
+		for (var pi = 0; pi < _characters.Count; pi++)
+			TryReplanPathWithDestinationFallback(pi);
 		QueueRedraw();
 	}
 
@@ -306,9 +349,13 @@ public partial class GridSimulator : Node2D
 		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
-		RelocateCharactersOffWater();
-		EnsureCharacterDestinationsAreValid();
+		RelocateCharactersToWalkableGround();
 		GenerateRandomBuildingsAfterTerrain(2);
+		RelocateCharactersToWalkableGround();
+		EnsureCharacterDestinationsAreValid();
+		EnsurePathStateSize();
+		for (var pi = 0; pi < _characters.Count; pi++)
+			TryReplanPathWithDestinationFallback(pi);
 		QueueRedraw();
 	}
 
@@ -478,8 +525,8 @@ public partial class GridSimulator : Node2D
 		{
 			var type = spawnPlan[i];
 			var label = $"{type} {i + 1}";
-			var safeCell = FindNearestNonWaterCell(spawnCells[i]);
-			var destination = FindRandomNonWaterCell();
+			var safeCell = FindNearestWalkableCell(spawnCells[i]);
+			var destination = FindRandomValidDestinationCell();
 			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label, destination));
 		}
 	}
@@ -504,15 +551,15 @@ public partial class GridSimulator : Node2D
 		return cells;
 	}
 
-	private void RelocateCharactersOffWater()
+	private void RelocateCharactersToWalkableGround()
 	{
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var character = _characters[i];
-			if (_terrain[character.Cell.X, character.Cell.Y] != TerrainType.Water)
+			if (IsWalkableCharacterCell(character.Cell))
 				continue;
 
-			character.Cell = FindNearestNonWaterCell(character.Cell);
+			character.Cell = FindNearestWalkableCell(character.Cell);
 		}
 	}
 
@@ -522,24 +569,24 @@ public partial class GridSimulator : Node2D
 		{
 			var character = _characters[i];
 			var destination = character.Destination;
-			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight)
+			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight ||
+				!IsValidDestinationCell(destination))
 			{
-				character.Destination = FindRandomNonWaterCell();
-				continue;
+				character.Destination = FindRandomValidDestinationCell(character.Cell);
 			}
-
-			if (_terrain[destination.X, destination.Y] == TerrainType.Water)
-				character.Destination = FindRandomNonWaterCell();
 		}
 	}
 
-	private Vector2I FindNearestNonWaterCell(Vector2I start)
+	private bool IsValidDestinationCell(Vector2I cell) =>
+		IsWalkableCharacterCell(cell);
+
+	private Vector2I FindNearestWalkableCell(Vector2I start)
 	{
 		var clampedStart = new Vector2I(
 			Mathf.Clamp(start.X, 0, GridWidth - 1),
 			Mathf.Clamp(start.Y, 0, GridHeight - 1)
 		);
-		if (_terrain[clampedStart.X, clampedStart.Y] != TerrainType.Water)
+		if (IsWalkableCharacterCell(clampedStart))
 			return clampedStart;
 
 		var visited = new bool[GridWidth, GridHeight];
@@ -560,7 +607,7 @@ public partial class GridSimulator : Node2D
 					continue;
 
 				visited[next.X, next.Y] = true;
-				if (_terrain[next.X, next.Y] != TerrainType.Water)
+				if (IsWalkableCharacterCell(next))
 					return next;
 				queue.Enqueue(next);
 			}
@@ -569,18 +616,169 @@ public partial class GridSimulator : Node2D
 		return clampedStart;
 	}
 
-	private Vector2I FindRandomNonWaterCell()
+	private Vector2I FindRandomValidDestinationCell(Vector2I? avoidCell = null)
 	{
-		var maxAttempts = 1200;
+		var maxAttempts = 2000;
 		for (var i = 0; i < maxAttempts; i++)
 		{
 			var x = _rng.RandiRange(0, GridWidth - 1);
 			var y = _rng.RandiRange(0, GridHeight - 1);
-			if (_terrain[x, y] != TerrainType.Water)
-				return new Vector2I(x, y);
+			var c = new Vector2I(x, y);
+			if (!IsValidDestinationCell(c))
+				continue;
+			if (avoidCell.HasValue && c == avoidCell.Value)
+				continue;
+			return c;
 		}
 
-		return FindNearestNonWaterCell(new Vector2I(GridWidth / 2, GridHeight / 2));
+		return FindNearestWalkableCell(new Vector2I(GridWidth / 2, GridHeight / 2));
+	}
+
+	private int GetPathMoveCost(Vector2I cell) =>
+		_terrain[cell.X, cell.Y] == TerrainType.Forest ? ForestTerrainMoveCost : DefaultTerrainMoveCost;
+
+	private void EnsurePathStateSize()
+	{
+		while (_characterPathQueues.Count < _characters.Count)
+		{
+			_characterPathQueues.Add(new Queue<Vector2I>());
+			_characterMoveBudget.Add(0f);
+		}
+
+		while (_characterPathQueues.Count > _characters.Count)
+		{
+			_characterPathQueues.RemoveAt(_characterPathQueues.Count - 1);
+			_characterMoveBudget.RemoveAt(_characterMoveBudget.Count - 1);
+		}
+	}
+
+	private bool ReplanCharacterPath(int index)
+	{
+		EnsurePathStateSize();
+		var character = _characters[index];
+		var pathQueue = _characterPathQueues[index];
+		pathQueue.Clear();
+		_characterMoveBudget[index] = 0f;
+
+		if (character.Cell == character.Destination)
+			return true;
+
+		var fullPath = GridAStar.FindPath(
+			GridWidth,
+			GridHeight,
+			character.Cell,
+			character.Destination,
+			IsWalkableCharacterCell,
+			GetPathMoveCost
+		);
+		if (fullPath == null)
+			return false;
+
+		for (var s = 1; s < fullPath.Count; s++)
+			pathQueue.Enqueue(fullPath[s]);
+
+		return true;
+	}
+
+	private void TryReplanPathWithDestinationFallback(int index)
+	{
+		if (ReplanCharacterPath(index))
+			return;
+		for (var attempt = 0; attempt < 8; attempt++)
+		{
+			_characters[index].Destination = FindRandomValidDestinationCell(_characters[index].Cell);
+			if (ReplanCharacterPath(index))
+				return;
+		}
+	}
+
+	private void StepCharactersTowardDestination()
+	{
+		EnsurePathStateSize();
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var character = _characters[i];
+			var pathQueue = _characterPathQueues[i];
+
+			if (character.Cell == character.Destination)
+			{
+				character.Destination = FindNewDestinationAfterArrival(character.Cell);
+				TryReplanPathWithDestinationFallback(i);
+				continue;
+			}
+
+			_characterMoveBudget[i] += MovementBudgetPerGridMajorStep;
+			var moved = false;
+			while (_characterMoveBudget[i] > 0f)
+			{
+				if (pathQueue.Count == 0)
+				{
+					if (!ReplanCharacterPath(i))
+					{
+						TryReplanPathWithDestinationFallback(i);
+					}
+
+					if (pathQueue.Count == 0)
+						break;
+				}
+
+				var next = pathQueue.Peek();
+				var dist = Mathf.Abs(next.X - character.Cell.X) + Mathf.Abs(next.Y - character.Cell.Y);
+				if (dist != 1)
+				{
+					ReplanCharacterPath(i);
+					if (pathQueue.Count == 0)
+					{
+						TryReplanPathWithDestinationFallback(i);
+					}
+
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+
+				if (!IsWalkableCharacterCell(next))
+				{
+					ReplanCharacterPath(i);
+					if (pathQueue.Count == 0)
+					{
+						TryReplanPathWithDestinationFallback(i);
+					}
+
+					if (pathQueue.Count == 0)
+						break;
+					continue;
+				}
+
+				var cost = (float)GetPathMoveCost(next);
+				if (_characterMoveBudget[i] < cost)
+					break;
+
+				_characterMoveBudget[i] -= cost;
+				pathQueue.Dequeue();
+				character.Cell = next;
+				moved = true;
+			}
+
+			if (moved)
+			{
+				// Reached destination along path: trim so next tick picks new dest if needed
+				if (character.Cell == character.Destination)
+					pathQueue.Clear();
+			}
+		}
+	}
+
+	private Vector2I FindNewDestinationAfterArrival(Vector2I currentCell) =>
+		FindRandomValidDestinationCell(currentCell);
+
+	private bool IsWalkableCharacterCell(Vector2I cell)
+	{
+		if (cell.X < 0 || cell.Y < 0 || cell.X >= GridWidth || cell.Y >= GridHeight)
+			return false;
+		if (_buildingCells.Contains(cell))
+			return false;
+		return _terrain[cell.X, cell.Y] != TerrainType.Water;
 	}
 
 	private void RemoveAllBuildingsFromBoard()
