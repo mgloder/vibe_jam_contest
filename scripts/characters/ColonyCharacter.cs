@@ -23,6 +23,7 @@ public sealed class ColonyCharacter
 	public CharacterToolType Tool { get; }
 	public string DisplayName { get; set; }
 	public Vector2I Cell { get; set; }
+	public Vector2I Destination { get; set; }
 	public string[] SpriteRows { get; }
 	public Vector2I SpritePivot { get; }
 	public IReadOnlyDictionary<char, Color> Palette { get; }
@@ -36,6 +37,7 @@ public sealed class ColonyCharacter
 		CharacterToolType tool,
 		string displayName,
 		Vector2I cell,
+		Vector2I destination,
 		string[] spriteRows,
 		Vector2I spritePivot,
 		IReadOnlyDictionary<char, Color> palette,
@@ -49,6 +51,7 @@ public sealed class ColonyCharacter
 		Tool = tool;
 		DisplayName = displayName;
 		Cell = cell;
+		Destination = destination;
 		SpriteRows = spriteRows;
 		SpritePivot = spritePivot;
 		Palette = palette;
@@ -62,7 +65,7 @@ public sealed class ColonyCharacter
 		return CreateByType(ColonyCharacterType.Civilian, cell, "Starter Civilian");
 	}
 
-	public static ColonyCharacter CreateByType(ColonyCharacterType type, Vector2I cell, string? displayName = null)
+	public static ColonyCharacter CreateByType(ColonyCharacterType type, Vector2I cell, string? displayName = null, Vector2I? destination = null)
 	{
 		var (spriteRows, palette, toolRows, toolPalette, tool, defaultName) = type switch
 		{
@@ -78,6 +81,7 @@ public sealed class ColonyCharacter
 			tool: tool,
 			displayName: displayName ?? defaultName,
 			cell: cell,
+			destination: destination ?? cell,
 			spriteRows: spriteRows,
 			spritePivot: new Vector2I(3, 4),
 			palette: palette,

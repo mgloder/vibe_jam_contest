@@ -31,6 +31,7 @@ public partial class GridSimulator : Node2D
 	private bool _isCharacterVisible = true;
 	private TerrainType[,] _terrain = null!;
 	private readonly HashSet<Vector2I> _buildingCells = new();
+	private readonly List<Rect2I> _buildingFootprints = new();
 	private bool _buildingSimEnabled;
 	private Timer _buildingGrowthTimer = null!;
 	private readonly Queue<Vector2I> _activeBuildingQueue = new();
@@ -39,6 +40,7 @@ public partial class GridSimulator : Node2D
 	private Vector2I _lastCompletedBuildingOrigin;
 	private int _buildingWidthCells;
 	private int _buildingHeightCells;
+	private Texture2D _buildingTexture = null!;
 	private const int BuildingSizeMultiplier = 2;
 	private const int MinGridLineStepCells = 10;
 
@@ -60,6 +62,7 @@ public partial class GridSimulator : Node2D
 
 		_terrain = new TerrainType[GridWidth, GridHeight];
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		_buildingTexture = GD.Load<Texture2D>("res://sprites/buildings/building.png");
 		_buildingGrowthTimer = new Timer();
 		_buildingGrowthTimer.WaitTime = BuildingGrowthIntervalSec;
 		_buildingGrowthTimer.OneShot = false;
@@ -104,13 +107,12 @@ public partial class GridSimulator : Node2D
 			for (var x = 0; x < GridWidth; x++)
 			{
 				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
-				var cell = new Vector2I(x, y);
-				var color = _buildingCells.Contains(cell)
-					? BuildingCellColor(x, y)
-					: TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
+				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
 				DrawRect(new Rect2(px, cellSize), color);
 			}
 		}
+
+		DrawBuildingSprites(origin);
 
 		var gridStep = Mathf.Max(MinGridLineStepCells, 1);
 		var lineColor = new Color(0.52f, 0.52f, 0.52f, 0.62f); // darker light gray
@@ -129,9 +131,24 @@ public partial class GridSimulator : Node2D
 		if (_isCharacterVisible)
 		{
 			for (var i = 0; i < _characters.Count; i++)
+			{
+				DrawCharacterDestination(_characters[i], origin);
 				DrawCharacter(_characters[i], origin);
+			}
 		}
 		DrawRect(new Rect2(origin, boardSize), new Color(0.48f, 0.63f, 0.88f), false, 2f);
+	}
+
+	private void DrawCharacterDestination(ColonyCharacter character, Vector2 gridOrigin)
+	{
+		var markerTopLeft = gridOrigin + new Vector2(character.Destination.X * CellSize, character.Destination.Y * CellSize);
+		var markerSize = Mathf.Max(1f, CellSize);
+		var inset = markerSize <= 2f ? 0f : 1f;
+		var rect = new Rect2(
+			markerTopLeft + new Vector2(inset, inset),
+			new Vector2(Mathf.Max(1f, markerSize - inset * 2f), Mathf.Max(1f, markerSize - inset * 2f))
+		);
+		DrawRect(rect, new Color(0.93f, 0.86f, 0.22f, 0.92f), false, 1f);
 	}
 
 	private void DrawCharacter(ColonyCharacter character, Vector2 gridOrigin)
@@ -231,7 +248,7 @@ public partial class GridSimulator : Node2D
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var current = _characters[i];
-			_characters[i] = ColonyCharacter.CreateByType(current.Type, current.Cell, current.DisplayName);
+			_characters[i] = ColonyCharacter.CreateByType(current.Type, current.Cell, current.DisplayName, current.Destination);
 		}
 		UpdateHud();
 		QueueRedraw();
@@ -264,6 +281,7 @@ public partial class GridSimulator : Node2D
 	{
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		RelocateCharactersOffWater();
+		EnsureCharacterDestinationsAreValid();
 		GenerateRandomBuildingsAfterTerrain(2);
 		QueueRedraw();
 	}
@@ -289,6 +307,7 @@ public partial class GridSimulator : Node2D
 		// Apply immediately so slider feedback is obvious.
 		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		RelocateCharactersOffWater();
+		EnsureCharacterDestinationsAreValid();
 		GenerateRandomBuildingsAfterTerrain(2);
 		QueueRedraw();
 	}
@@ -346,10 +365,18 @@ public partial class GridSimulator : Node2D
 		);
 	}
 
-	private static Color BuildingCellColor(int x, int y)
+	private void DrawBuildingSprites(Vector2 gridOrigin)
 	{
-		var checker = ((x + y) & 1) == 0;
-		return checker ? new Color(0.73f, 0.55f, 0.31f) : new Color(0.65f, 0.47f, 0.24f);
+		if (_buildingTexture == null)
+			return;
+
+		for (var i = 0; i < _buildingFootprints.Count; i++)
+		{
+			var footprint = _buildingFootprints[i];
+			var topLeft = gridOrigin + new Vector2(footprint.Position.X * CellSize, footprint.Position.Y * CellSize);
+			var drawSize = new Vector2(footprint.Size.X * CellSize, footprint.Size.Y * CellSize);
+			DrawTextureRect(_buildingTexture, new Rect2(topLeft, drawSize), false);
+		}
 	}
 
 	private void GenerateRandomBuildingsAfterTerrain(int count)
@@ -358,6 +385,7 @@ public partial class GridSimulator : Node2D
 			(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
 
 		_buildingCells.Clear();
+		_buildingFootprints.Clear();
 		_activeBuildingQueue.Clear();
 		_hasActiveBuildingProject = false;
 
@@ -408,6 +436,7 @@ public partial class GridSimulator : Node2D
 
 	private void AddBuildingFootprint(Vector2I origin)
 	{
+		_buildingFootprints.Add(new Rect2I(origin, new Vector2I(_buildingWidthCells, _buildingHeightCells)));
 		for (var y = 0; y < _buildingHeightCells; y++)
 		{
 			for (var x = 0; x < _buildingWidthCells; x++)
@@ -450,7 +479,8 @@ public partial class GridSimulator : Node2D
 			var type = spawnPlan[i];
 			var label = $"{type} {i + 1}";
 			var safeCell = FindNearestNonWaterCell(spawnCells[i]);
-			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label));
+			var destination = FindRandomNonWaterCell();
+			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label, destination));
 		}
 	}
 
@@ -483,6 +513,23 @@ public partial class GridSimulator : Node2D
 				continue;
 
 			character.Cell = FindNearestNonWaterCell(character.Cell);
+		}
+	}
+
+	private void EnsureCharacterDestinationsAreValid()
+	{
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var character = _characters[i];
+			var destination = character.Destination;
+			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight)
+			{
+				character.Destination = FindRandomNonWaterCell();
+				continue;
+			}
+
+			if (_terrain[destination.X, destination.Y] == TerrainType.Water)
+				character.Destination = FindRandomNonWaterCell();
 		}
 	}
 
@@ -522,9 +569,24 @@ public partial class GridSimulator : Node2D
 		return clampedStart;
 	}
 
+	private Vector2I FindRandomNonWaterCell()
+	{
+		var maxAttempts = 1200;
+		for (var i = 0; i < maxAttempts; i++)
+		{
+			var x = _rng.RandiRange(0, GridWidth - 1);
+			var y = _rng.RandiRange(0, GridHeight - 1);
+			if (_terrain[x, y] != TerrainType.Water)
+				return new Vector2I(x, y);
+		}
+
+		return FindNearestNonWaterCell(new Vector2I(GridWidth / 2, GridHeight / 2));
+	}
+
 	private void RemoveAllBuildingsFromBoard()
 	{
 		_buildingCells.Clear();
+		_buildingFootprints.Clear();
 		_activeBuildingQueue.Clear();
 		_hasActiveBuildingProject = false;
 		_buildingSimEnabled = false;
