@@ -24,6 +24,13 @@ public sealed class ColonyCharacter
 	public string DisplayName { get; set; }
 	public Vector2I Cell { get; set; }
 	public Vector2I Destination { get; set; }
+	/// <summary>Current hit points. Civilian: 1; Soldier: 2; Expert: 4.</summary>
+	public int Health { get; set; }
+	public int MaxHealth { get; }
+	/// <summary>Attack power. Civilian: 0; Soldier: 1; Expert: 3.</summary>
+	public int Attack { get; }
+	/// <summary>True if <see cref="Attack"/> is greater than zero.</summary>
+	public bool CanAttack => Attack > 0;
 	public string[] SpriteRows { get; }
 	public Vector2I SpritePivot { get; }
 	public IReadOnlyDictionary<char, Color> Palette { get; }
@@ -38,6 +45,9 @@ public sealed class ColonyCharacter
 		string displayName,
 		Vector2I cell,
 		Vector2I destination,
+		int maxHealth,
+		int health,
+		int attack,
 		string[] spriteRows,
 		Vector2I spritePivot,
 		IReadOnlyDictionary<char, Color> palette,
@@ -52,6 +62,9 @@ public sealed class ColonyCharacter
 		DisplayName = displayName;
 		Cell = cell;
 		Destination = destination;
+		MaxHealth = maxHealth;
+		Health = health;
+		Attack = attack;
 		SpriteRows = spriteRows;
 		SpritePivot = spritePivot;
 		Palette = palette;
@@ -75,6 +88,14 @@ public sealed class ColonyCharacter
 			_ => BuildCivilianVisual()
 		};
 
+		var (maxHealth, attack) = type switch
+		{
+			ColonyCharacterType.Civilian => (1, 0),
+			ColonyCharacterType.Expert => (4, 3),
+			ColonyCharacterType.Soldier => (2, 1),
+			_ => (1, 0)
+		};
+
 		return new ColonyCharacter(
 			id: Guid.NewGuid().ToString("N"),
 			type: type,
@@ -82,6 +103,9 @@ public sealed class ColonyCharacter
 			displayName: displayName ?? defaultName,
 			cell: cell,
 			destination: destination ?? cell,
+			maxHealth: maxHealth,
+			health: maxHealth,
+			attack: attack,
 			spriteRows: spriteRows,
 			spritePivot: new Vector2I(3, 4),
 			palette: palette,

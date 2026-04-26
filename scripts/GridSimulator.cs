@@ -86,6 +86,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		EnsureCharacterDestinationsAreValid();
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
@@ -271,7 +272,13 @@ public partial class GridSimulator : Node2D
 		var civilianCount = _characters.Count(c => c.Type == ColonyCharacterType.Civilian);
 		var expertCount = _characters.Count(c => c.Type == ColonyCharacterType.Expert);
 		var soldierCount = _characters.Count(c => c.Type == ColonyCharacterType.Soldier);
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPCs: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  NPC State: {visibility}";
+		var profileC = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Civilian);
+		var profileE = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Expert);
+		var profileS = _characters.FirstOrDefault(c => c.Type == ColonyCharacterType.Soldier);
+		var civStr = profileC != null ? $"{profileC.MaxHealth}HP/{profileC.Attack}atk" : "1/0";
+		var expStr = profileE != null ? $"{profileE.MaxHealth}HP/{profileE.Attack}atk" : "4/3";
+		var solStr = profileS != null ? $"{profileS.MaxHealth}HP/{profileS.Attack}atk" : "2/1";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPCs: {_characters.Count} (C:{civilianCount} E:{expertCount} S:{soldierCount})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  Profiles: C {civStr}  E {expStr}  S {solStr}  |  NPC State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
 	}
@@ -284,6 +291,7 @@ public partial class GridSimulator : Node2D
 			_characters[i] = ColonyCharacter.CreateByType(current.Type, current.Cell, current.DisplayName, current.Destination);
 		}
 		EnsurePathStateSize();
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		for (var ri = 0; ri < _characters.Count; ri++)
 			TryReplanPathWithDestinationFallback(ri);
 		UpdateHud();
@@ -320,6 +328,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		EnsureCharacterDestinationsAreValid();
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
@@ -337,6 +346,8 @@ public partial class GridSimulator : Node2D
 			}
 		}
 
+		EnsureCharacterDestinationsAreValid();
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
@@ -353,6 +364,7 @@ public partial class GridSimulator : Node2D
 		GenerateRandomBuildingsAfterTerrain(2);
 		RelocateCharactersToWalkableGround();
 		EnsureCharacterDestinationsAreValid();
+		RecalculateCivilianFleeDestinationsFromCurrentEnemies();
 		EnsurePathStateSize();
 		for (var pi = 0; pi < _characters.Count; pi++)
 			TryReplanPathWithDestinationFallback(pi);
@@ -526,8 +538,16 @@ public partial class GridSimulator : Node2D
 			var type = spawnPlan[i];
 			var label = $"{type} {i + 1}";
 			var safeCell = FindNearestWalkableCell(spawnCells[i]);
-			var destination = FindRandomValidDestinationCell();
-			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label, destination));
+			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label, null));
+		}
+
+		// Roster is complete: civilians flee toward the farthest point from all attackers; others keep random dest.
+		for (var j = 0; j < _characters.Count; j++)
+		{
+			var c = _characters[j];
+			c.Destination = c.Type == ColonyCharacterType.Civilian
+				? FindCivilianFleeDestination(c, c.Cell)
+				: FindRandomValidDestinationCell();
 		}
 	}
 
@@ -572,7 +592,9 @@ public partial class GridSimulator : Node2D
 			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight ||
 				!IsValidDestinationCell(destination))
 			{
-				character.Destination = FindRandomValidDestinationCell(character.Cell);
+				character.Destination = character.Type == ColonyCharacterType.Civilian
+					? FindCivilianFleeDestination(character, character.Cell)
+					: FindRandomValidDestinationCell(character.Cell);
 			}
 		}
 	}
@@ -686,7 +708,7 @@ public partial class GridSimulator : Node2D
 			return;
 		for (var attempt = 0; attempt < 8; attempt++)
 		{
-			_characters[index].Destination = FindRandomValidDestinationCell(_characters[index].Cell);
+			_characters[index].Destination = GetDestinationForPathFallback(_characters[index]);
 			if (ReplanCharacterPath(index))
 				return;
 		}
@@ -702,7 +724,7 @@ public partial class GridSimulator : Node2D
 
 			if (character.Cell == character.Destination)
 			{
-				character.Destination = FindNewDestinationAfterArrival(character.Cell);
+				character.Destination = FindNewDestinationAfterArrival(character);
 				TryReplanPathWithDestinationFallback(i);
 				continue;
 			}
@@ -769,8 +791,86 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	private Vector2I FindNewDestinationAfterArrival(Vector2I currentCell) =>
-		FindRandomValidDestinationCell(currentCell);
+	private Vector2I FindNewDestinationAfterArrival(ColonyCharacter c) =>
+		c.Type == ColonyCharacterType.Civilian
+			? FindCivilianFleeDestination(c, c.Cell)
+			: FindRandomValidDestinationCell(c.Cell);
+
+	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
+		Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y);
+
+	/// <summary>Attack-capable units (Expert, Soldier) are treated as threats for flee targeting.</summary>
+	private List<Vector2I> GetEnemyCellsForCivilian(ColonyCharacter self)
+	{
+		var list = new List<Vector2I>();
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var o = _characters[i];
+			if (o.Id == self.Id)
+				continue;
+			if (o.CanAttack)
+				list.Add(o.Cell);
+		}
+		return list;
+	}
+
+	/// <summary>Valid, non-water cell that maximizes distance to the nearest current enemy (Manhattan). No enemies → random valid.</summary>
+	private Vector2I FindCivilianFleeDestination(ColonyCharacter self, Vector2I? avoidCell = null)
+	{
+		var enemies = GetEnemyCellsForCivilian(self);
+		if (enemies.Count == 0)
+			return FindRandomValidDestinationCell(avoidCell ?? self.Cell);
+
+		var bestScore = -1;
+		var best = new Vector2I(
+			Mathf.Clamp(self.Cell.X, 0, GridWidth - 1),
+			Mathf.Clamp(self.Cell.Y, 0, GridHeight - 1)
+		);
+
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				var cell = new Vector2I(x, y);
+				if (!IsValidDestinationCell(cell))
+					continue;
+				if (avoidCell.HasValue && cell == avoidCell.Value)
+					continue;
+				var minD = int.MaxValue;
+				for (var e = 0; e < enemies.Count; e++)
+				{
+					var d = ManhattanDistance(cell, enemies[e]);
+					if (d < minD)
+						minD = d;
+				}
+				if (minD > bestScore)
+				{
+					bestScore = minD;
+					best = cell;
+				}
+			}
+		}
+
+		if (bestScore < 0)
+			return FindRandomValidDestinationCell(avoidCell);
+		return best;
+	}
+
+	private Vector2I GetDestinationForPathFallback(ColonyCharacter c) =>
+		c.Type == ColonyCharacterType.Civilian
+			? FindCivilianFleeDestination(c, c.Cell)
+			: FindRandomValidDestinationCell(c.Cell);
+
+	private void RecalculateCivilianFleeDestinationsFromCurrentEnemies()
+	{
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (c.Type != ColonyCharacterType.Civilian)
+				continue;
+			c.Destination = FindCivilianFleeDestination(c, c.Cell);
+		}
+	}
 
 	private bool IsWalkableCharacterCell(Vector2I cell)
 	{
