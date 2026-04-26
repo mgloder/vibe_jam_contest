@@ -3,7 +3,7 @@ using Godot;
 public partial class WelcomeScreen : Control
 {
 	[Export]
-	public string NextScenePath { get; set; } = "res://scenes/gameplay_placeholder.tscn";
+	public string NextScenePath { get; set; } = "res://scenes/grid_simulator.tscn";
 
 	public override void _Ready()
 	{

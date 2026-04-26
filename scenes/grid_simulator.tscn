@@ -1,0 +1,86 @@
+[gd_scene format=3 uid="uid://ch8kr0m8gw2m0"]
+
+[ext_resource type="Script" path="res://scripts/GridSimulator.cs" id="1_grid_sim"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
+bg_color = Color(0.0862745, 0.109804, 0.152941, 0.921569)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.282353, 0.392157, 0.556863, 0.901961)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[node name="GridSimulator" type="Node2D"]
+script = ExtResource("1_grid_sim")
+
+[node name="BackgroundLayer" type="CanvasLayer" parent="."]
+layer = -1
+
+[node name="Background" type="ColorRect" parent="BackgroundLayer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.0470588, 0.0588235, 0.0862745, 1)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="TopPanel" type="PanelContainer" parent="UI"]
+offset_left = 22.0
+offset_top = 18.0
+offset_right = 692.0
+offset_bottom = 130.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+
+[node name="TopMargin" type="MarginContainer" parent="UI/TopPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="TopVBox" type="VBoxContainer" parent="UI/TopPanel/TopMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="TitleLabel" type="Label" parent="UI/TopPanel/TopMargin/TopVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 28
+text = "Grid Simulator"
+
+[node name="StatusLabel" type="Label" parent="UI/TopPanel/TopMargin/TopVBox" unique_id=1612231940]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.772549, 0.839216, 0.941176, 1)
+theme_override_font_sizes/font_size = 16
+text = "Empty simulation board scaffold"
+
+[node name="StatsLabel" type="Label" parent="UI/TopPanel/TopMargin/TopVBox" unique_id=1687934980]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.65098, 0.733333, 0.878431, 1)
+theme_override_font_sizes/font_size = 15
+text = "Grid: 960x540  |  Cell: 1px"
+
+[node name="HelpLabel" type="Label" parent="UI"]
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -420.0
+offset_top = -38.0
+offset_right = 420.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.619608, 0.690196, 0.823529, 1)
+theme_override_font_sizes/font_size = 15
+text = "RimWorld-style foundation phase: board only for now (press R to refresh)."
+horizontal_alignment = 1

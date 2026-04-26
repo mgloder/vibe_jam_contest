@@ -4,7 +4,7 @@ _Last updated: 2026-04-26_
 
 ## What this is
 
-A clean **Godot 4.6** starter using **C#** (`.NET 8`, `Godot.NET.Sdk` 4.6.2). Entry flow: **welcome UI** (`scenes/welcome.tscn`) → **gameplay placeholder** (`scenes/gameplay_placeholder.tscn`) via the main button. Use this as a base shell for a new game prototype.
+A **Godot 4.6** pixel-grid game foundation using **C#** (`.NET 8`, `Godot.NET.Sdk` 4.6.2). Entry flow: **welcome UI** (`scenes/welcome.tscn`) → **grid simulator** (`scenes/grid_simulator.tscn`) via Start. The board is intentionally empty now to prepare for a RimWorld-style systems game.
 
 ## Engine & tooling
 
@@ -25,21 +25,25 @@ A clean **Godot 4.6** starter using **C#** (`.NET 8`, `Godot.NET.Sdk` 4.6.2). En
 |------|------|
 | `project.godot` | Project config; `run/main_scene` = `res://scenes/welcome.tscn` |
 | `New Game Project.csproj` / `New Game Project.sln` | C# build |
-| `scenes/welcome.tscn` | Generic welcome/menu shell for bootstrapping a new game |
-| `scripts/WelcomeScreen.cs` | Main button → `ChangeSceneToFile` (default `res://scenes/gameplay_placeholder.tscn`; export `NextScenePath`) |
-| `scenes/gameplay_placeholder.tscn` | Temporary target scene to replace with your real gameplay entry point |
+| `scenes/welcome.tscn` | Welcome/menu shell for launching the simulation |
+| `scripts/WelcomeScreen.cs` | Start button → `ChangeSceneToFile` (default `res://scenes/grid_simulator.tscn`; export `NextScenePath`) |
+| `scenes/grid_simulator.tscn` | Main simulation scene with HUD, timer, and controls help |
+| `scripts/GridSimulator.cs` | Empty large pixel board renderer and starter HUD for upcoming RimWorld-style systems |
 | `scenes/snake_game.tscn` | Existing Snake prototype scene retained for reference |
 | `scripts/SnakeGame.cs` | Existing Snake prototype logic retained for reference |
 | `icon.svg` | Application icon |
 
 ## Code notes
 
+- `GridSimulator` currently defaults to a very large board: **960×540** cells at **1 px** cell size.
+- Current controls are intentionally minimal while scaffolding (`R` redraw).
+- No gameplay simulation rules are active yet; this scene is a visual and structural base.
 - `WelcomeScreen.NextScenePath` is export-driven, so scene flow can be rewired per scene without code changes.
 - `WelcomeScreen` focuses the main button on load for keyboard/controller-friendly navigation.
 - Snake files are optional legacy prototype content and are no longer the default flow.
 
 ## Open questions / next steps
 
-- Rename display/project/assembly names once the real game title is decided.
-- Replace `scenes/gameplay_placeholder.tscn` with the first actual gameplay scene.
-- Decide whether to delete or archive the Snake prototype once the new game direction is stable.
+- Choose simulation-specific mechanics on top of Life rules (resources, agents, hazards, terrain, economy, etc.).
+- Decide whether grid edges should wrap toroidally or remain bounded.
+- Decide whether to delete or archive the Snake prototype now that the simulator is the default game direction.

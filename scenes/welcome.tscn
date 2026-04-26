@@ -94,14 +94,14 @@ horizontal_alignment = 1
 [node name="Title" type="Label" parent="Center/Card/Margin/VBox" unique_id=49734381]
 layout_mode = 2
 theme_override_font_sizes/font_size = 64
-text = "New Game Project"
+text = "Grid Simulation Lab"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Center/Card/Margin/VBox" unique_id=872162110]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.784314, 0.815686, 0.886275, 1)
 theme_override_font_sizes/font_size = 20
-text = "Use this polished shell to kick off your next prototype."
+text = "Prototype and iterate on a grid-based simulation in Godot C#."
 horizontal_alignment = 1
 autowrap_mode = 3
 
@@ -118,7 +118,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 layout_mode = 2
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
 theme_override_font_sizes/font_size = 15
-text = "Custom scene flow"
+text = "Cellular automata"
 
 [node name="GrowthCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=1805131311]
 layout_mode = 2
@@ -128,7 +128,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 layout_mode = 2
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
 theme_override_font_sizes/font_size = 15
-text = "Reusable UI card"
+text = "Interactive painting"
 
 [node name="RulesCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=17270122]
 layout_mode = 2
@@ -155,7 +155,7 @@ theme_override_constants/margin_bottom = 18
 layout_mode = 2
 theme_override_colors/font_color = Color(0.815686, 0.847059, 0.905882, 1)
 theme_override_font_sizes/font_size = 17
-text = "Click Start to open the gameplay placeholder. Replace it with your real first level when you are ready."
+text = "Click Start to open the grid simulator. Use Space, N, R, C, and mouse painting controls to explore simulation behavior."
 horizontal_alignment = 1
 autowrap_mode = 3
 
@@ -167,11 +167,11 @@ theme_override_font_sizes/font_size = 26
 theme_override_styles/normal = SubResource("StyleBoxFlat_button")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button")
-text = "Open Placeholder"
+text = "Start Simulator"
 
 [node name="Footer" type="Label" parent="Center/Card/Margin/VBox" unique_id=828590968]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.588235, 0.635294, 0.713726, 1)
 theme_override_font_sizes/font_size = 15
-text = "Clean starter structure for your next Godot C# game."
+text = "Initial game foundation: grid simulation starter."
 horizontal_alignment = 1
