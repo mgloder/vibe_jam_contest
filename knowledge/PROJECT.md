@@ -11,7 +11,7 @@ A **Godot 4.6** pixel-grid game foundation using **C#** (`.NET 8`, `Godot.NET.Sd
 | Item | Value |
 |------|--------|
 | Godot | 4.6 (`config/features` includes `"4.6"`) |
-| Language | C# (`[dotnet]` section; assembly `EdgeOfChaos`) — display name 混沌边缘 (Edge of Chaos) |
+| Language | C# (`[dotnet]` section; assembly `EdgeOfChaos`) — display name Edge of Chaos |
 | Target framework | `net8.0` (Android build path uses `net9.0`) |
 | Root namespace | `EdgeOfChaos` |
 | Rendering | Forward Plus |

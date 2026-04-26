@@ -25,10 +25,30 @@ public partial class GridSimulator : Node2D
 	[Export]
 	public bool DrawMajorGridLines { get; set; } = false;
 
+	[Export] public int InitialCurrency { get; set; } = 12;
+
+	/// <summary>Player resource shown in the top bar; clamped 0–100 in UI and when set.</summary>
+	public int PlayerCurrency
+	{
+		get => _playerCurrency;
+		set
+		{
+			_playerCurrency = Mathf.Clamp(value, PlayerCurrencyMin, PlayerCurrencyMax);
+			UpdateCurrencyUi();
+		}
+	}
+
+	private const int PlayerCurrencyMin = 0;
+	private const int PlayerCurrencyMax = 100;
+
 	private Label? _statusLabel;
 	private Label? _statsLabel;
 	private Control? _topPanel;
+	private Control? _abilityBarPanel;
+	private ProgressBar? _currencyBar;
+	private Label? _currencyValueLabel;
 	private GridControlPanel? _controlPanel;
+	private int _playerCurrency;
 	private readonly List<ColonyCharacter> _characters = new();
 	private readonly List<EnemyCharacter> _enemies = new();
 	private readonly List<Queue<Vector2I>> _enemyPathQueues = new();
@@ -120,7 +140,10 @@ public partial class GridSimulator : Node2D
 		_statusLabel = GetNodeOrNull<Label>("%StatusLabel");
 		_statsLabel = GetNodeOrNull<Label>("%StatsLabel");
 		_topPanel = GetNodeOrNull<Control>("UI/TopPanel");
+		_abilityBarPanel = GetNodeOrNull<Control>("UI/AbilityBar");
 		_controlPanel = GetNodeOrNull<GridControlPanel>("%ControlPanel");
+		_currencyBar = GetNodeOrNull<ProgressBar>("%CurrencyBar");
+		_currencyValueLabel = GetNodeOrNull<Label>("%CurrencyValueLabel");
 		if (_controlPanel != null)
 		{
 			_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
@@ -166,6 +189,7 @@ public partial class GridSimulator : Node2D
 			TryReplanEnemyPathWithDestinationFallback(pe);
 		_controlPanel?.SetBuildingExpandSize(BuildingGrowthPerTick);
 		_controlPanel?.SetTerrainSmoothness(TerrainSmoothness);
+		_playerCurrency = Mathf.Clamp(InitialCurrency, PlayerCurrencyMin, PlayerCurrencyMax);
 		UpdateBoardLayout();
 		_lastLayoutViewportSize = GetViewport().GetVisibleRect().Size;
 		UpdateHud();
@@ -290,7 +314,8 @@ public partial class GridSimulator : Node2D
 	private void DrawUnitDestinationRect(Vector2I destination, Vector2 gridOrigin, Color color)
 	{
 		var s = _boardPixelsPerCell;
-		var markerTopLeft = gridOrigin + new Vector2(destination.X * s, destination.Y * s);
+		var d = ClampToGridBounds(destination);
+		var markerTopLeft = gridOrigin + new Vector2(d.X * s, d.Y * s);
 		var markerSize = Mathf.Max(1f, s);
 		var inset = markerSize <= 2f ? 0f : 1f;
 		var rect = new Rect2(
@@ -498,7 +523,10 @@ public partial class GridSimulator : Node2D
 		var topPadding = 16f;
 		var bottomPadding = 16f;
 		var topBound = topPanelBottom + topPadding;
-		var availableHeight = v.Y - topBound - bottomPadding;
+		var bottomOfPlayArea = v.Y - bottomPadding;
+		if (_abilityBarPanel != null)
+			bottomOfPlayArea = _abilityBarPanel.GetGlobalRect().Position.Y - 8f;
+		var availableHeight = Mathf.Max(0f, bottomOfPlayArea - topBound);
 		var fitW = availableWidth / Mathf.Max(1, GridWidth);
 		var fitH = availableHeight / Mathf.Max(1, GridHeight);
 		_boardPixelsPerCell = Mathf.Max(1f, Mathf.Min((float)CellSize, Mathf.Min(fitW, fitH)));
@@ -595,6 +623,19 @@ public partial class GridSimulator : Node2D
 		}
 		_controlPanel?.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel?.SetCharacterRandomizeEnabled(_isCharacterVisible);
+		UpdateCurrencyUi();
+	}
+
+	private void UpdateCurrencyUi()
+	{
+		if (_currencyBar != null)
+		{
+			_currencyBar.MinValue = PlayerCurrencyMin;
+			_currencyBar.MaxValue = PlayerCurrencyMax;
+			_currencyBar.Value = _playerCurrency;
+		}
+		if (_currencyValueLabel != null)
+			_currencyValueLabel.Text = _playerCurrency.ToString();
 	}
 
 	private void OnRandomizeCharacterPressed()
@@ -915,13 +956,13 @@ public partial class GridSimulator : Node2D
 			_characters.Add(ColonyCharacter.CreateByType(type, safeCell, label, null));
 		}
 
-		// Roster is complete: civilians flee toward the farthest point from all attackers; others keep random dest.
+		// Roster is complete: civilians get unique flee goals in roster order; others keep random dest.
+		AssignUniqueCivilianFleeDestinationsInOrder();
 		for (var j = 0; j < _characters.Count; j++)
 		{
 			var c = _characters[j];
-			c.Destination = c.Type == ColonyCharacterType.Civilian
-				? FindCivilianFleeDestination(c, c.Cell)
-				: FindRandomValidDestinationCell(c.Cell);
+			if (c.Type != ColonyCharacterType.Civilian)
+				c.Destination = FindRandomValidDestinationCell(c.Cell);
 		}
 	}
 
@@ -1004,7 +1045,7 @@ public partial class GridSimulator : Node2D
 	private void OnCharacterDied(int index)
 	{
 		var c = _characters[index];
-		c.Destination = c.Cell;
+		c.Destination = ClampToGridBounds(c.Cell);
 		_characterPathQueues[index].Clear();
 		_characterMoveBudget[index] = 0f;
 	}
@@ -1012,7 +1053,7 @@ public partial class GridSimulator : Node2D
 	private void OnEnemyDied(int index)
 	{
 		var e = _enemies[index];
-		e.Destination = e.Cell;
+		e.Destination = ClampToGridBounds(e.Cell);
 		_enemyPathQueues[index].Clear();
 		_enemyMoveBudget[index] = 0f;
 		EnsureEnemyPathStateSize();
@@ -1030,17 +1071,74 @@ public partial class GridSimulator : Node2D
 			var character = _characters[i];
 			if (character.Health <= 0)
 			{
-				character.Destination = character.Cell;
+				character.Destination = ClampToGridBounds(character.Cell);
 				continue;
 			}
-			var destination = character.Destination;
-			if (destination.X < 0 || destination.Y < 0 || destination.X >= GridWidth || destination.Y >= GridHeight ||
-				!IsValidDestinationCell(destination))
-			{
-				character.Destination = character.Type == ColonyCharacterType.Civilian
-					? FindCivilianFleeDestination(character, character.Cell)
-					: FindRandomValidDestinationCell(character.Cell);
-			}
+			if (character.Type == ColonyCharacterType.Civilian)
+				continue;
+
+			var d = ClampToGridBounds(character.Destination);
+			if (IsValidDestinationCell(d))
+				character.Destination = d;
+			else
+				character.Destination = FindRandomValidDestinationCell(character.Cell);
+		}
+
+		if (AnyCivilianInvalidDestination() || HasDuplicateCivilianDestinations())
+			AssignUniqueCivilianFleeDestinationsInOrder();
+
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			if (_characters[i].Health <= 0)
+				continue;
+			_characters[i].Destination = ClampToGridBounds(_characters[i].Destination);
+		}
+	}
+
+	private bool AnyCivilianInvalidDestination()
+	{
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (c.Type != ColonyCharacterType.Civilian || c.Health <= 0)
+				continue;
+			if (!IsValidDestinationCell(ClampToGridBounds(c.Destination)))
+				return true;
+		}
+		return false;
+	}
+
+	private bool HasDuplicateCivilianDestinations()
+	{
+		var seen = new HashSet<Vector2I>();
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (c.Type != ColonyCharacterType.Civilian || c.Health <= 0)
+				continue;
+			if (!seen.Add(ClampToGridBounds(c.Destination)))
+				return true;
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Every living civilian gets a new goal in roster order; each goal is distinct from earlier civilians in this pass.
+	/// </summary>
+	private void AssignUniqueCivilianFleeDestinationsInOrder()
+	{
+		var taken = new HashSet<Vector2I>();
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var c = _characters[i];
+			if (c.Type != ColonyCharacterType.Civilian || c.Health <= 0)
+				continue;
+			c.Destination = FindCivilianFleeDestination(c, c.Cell, taken);
+			var d = ClampToGridBounds(c.Destination);
+			if (taken.Contains(d) || !IsValidDestinationCell(d))
+				c.Destination = FindFirstWalkableDestinationExcluding(taken, c.Cell);
+			d = ClampToGridBounds(c.Destination);
+			taken.Add(d);
 		}
 	}
 
@@ -1051,27 +1149,54 @@ public partial class GridSimulator : Node2D
 			var e = _enemies[i];
 			if (e.Health <= 0)
 			{
-				e.Destination = e.Cell;
+				e.Destination = ClampToGridBounds(e.Cell);
 				continue;
 			}
-			var d = e.Destination;
-			if (d.X < 0 || d.Y < 0 || d.X >= GridWidth || d.Y >= GridHeight || !IsValidDestinationCell(d))
+			var d = ClampToGridBounds(e.Destination);
+			if (IsValidDestinationCell(d))
+				e.Destination = d;
+			else
 				e.Destination = FindRandomValidDestinationCell(e.Cell);
 		}
 	}
 
+	/// <summary>Snaps a cell to sim grid indices [0, <see cref="GridWidth"/>-1] × [0, <see cref="GridHeight"/>-1] so path goals and UI markers never leave the board.</summary>
+	private Vector2I ClampToGridBounds(Vector2I p)
+	{
+		var maxX = Mathf.Max(0, GridWidth - 1);
+		var maxY = Mathf.Max(0, GridHeight - 1);
+		return new Vector2I(Mathf.Clamp(p.X, 0, maxX), Mathf.Clamp(p.Y, 0, maxY));
+	}
+
 	private bool IsValidDestinationCell(Vector2I cell) =>
 		IsWalkableCharacterCell(cell);
+
+	/// <summary>Row-major first walkable cell that is not in <paramref name="excluded"/>, and not the optional <paramref name="avoidCell"/>.</summary>
+	private Vector2I FindFirstWalkableDestinationExcluding(ISet<Vector2I> excluded, Vector2I? avoidCell)
+	{
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				var cell = new Vector2I(x, y);
+				if (!IsValidDestinationCell(cell))
+					continue;
+				if (excluded.Contains(cell))
+					continue;
+				if (avoidCell.HasValue && cell == avoidCell.Value)
+					continue;
+				return cell;
+			}
+		}
+		return ClampToGridBounds(FindNearestWalkableCell(avoidCell ?? new Vector2I(GridWidth / 2, GridHeight / 2)));
+	}
 
 	/// <summary>
 	/// 4-way BFS from a clamped start; first cell matching <paramref name="isValidAnchor"/> (default single-cell <see cref="IsWalkableCharacterCell"/> = land, no building).
 	/// </summary>
 	private Vector2I FindNearestCellSatisfying(Vector2I start, Func<Vector2I, bool> isValidAnchor)
 	{
-		var clampedStart = new Vector2I(
-			Mathf.Clamp(start.X, 0, GridWidth - 1),
-			Mathf.Clamp(start.Y, 0, GridHeight - 1)
-		);
+		var clampedStart = ClampToGridBounds(start);
 		if (isValidAnchor(clampedStart))
 			return clampedStart;
 
@@ -1105,22 +1230,50 @@ public partial class GridSimulator : Node2D
 	private Vector2I FindNearestWalkableCell(Vector2I start) =>
 		FindNearestCellSatisfying(start, IsWalkableCharacterCell);
 
-	private Vector2I FindRandomValidDestinationCell(Vector2I? avoidCell = null)
+	private Vector2I FindRandomValidDestinationCell(Vector2I? avoidCell = null, ISet<Vector2I>? alsoAvoidDestinations = null)
 	{
+		if (GridWidth < 1 || GridHeight < 1)
+			return new Vector2I(0, 0);
+		var maxX = GridWidth - 1;
+		var maxY = GridHeight - 1;
 		var maxAttempts = 2000;
 		for (var i = 0; i < maxAttempts; i++)
 		{
-			var x = _rng.RandiRange(0, GridWidth - 1);
-			var y = _rng.RandiRange(0, GridHeight - 1);
+			var x = _rng.RandiRange(0, maxX);
+			var y = _rng.RandiRange(0, maxY);
 			var c = new Vector2I(x, y);
 			if (!IsValidDestinationCell(c))
 				continue;
 			if (avoidCell.HasValue && c == avoidCell.Value)
 				continue;
+			if (alsoAvoidDestinations != null && alsoAvoidDestinations.Contains(c))
+				continue;
 			return c;
 		}
 
-		return FindNearestWalkableCell(new Vector2I(GridWidth / 2, GridHeight / 2));
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				var c = new Vector2I(x, y);
+				if (!IsValidDestinationCell(c))
+					continue;
+				if (avoidCell.HasValue && c == avoidCell.Value)
+					continue;
+				if (alsoAvoidDestinations != null && alsoAvoidDestinations.Contains(c))
+					continue;
+				return c;
+			}
+		}
+
+		if (alsoAvoidDestinations != null && alsoAvoidDestinations.Count > 0)
+		{
+			var unblocked = FindFirstWalkableDestinationExcluding(alsoAvoidDestinations, avoidCell);
+			if (IsValidDestinationCell(unblocked) && !alsoAvoidDestinations.Contains(unblocked))
+				return unblocked;
+			return FindRandomValidDestinationCell(avoidCell, null);
+		}
+		return ClampToGridBounds(FindNearestWalkableCell(new Vector2I(GridWidth / 2, GridHeight / 2)));
 	}
 
 	private int GetPathMoveCost(Vector2I cell) =>
@@ -1163,6 +1316,7 @@ public partial class GridSimulator : Node2D
 	{
 		EnsurePathStateSize();
 		var character = _characters[index];
+		character.Destination = ClampToGridBounds(character.Destination);
 		var pathQueue = _characterPathQueues[index];
 		pathQueue.Clear();
 		_characterMoveBudget[index] = 0f;
@@ -1203,6 +1357,7 @@ public partial class GridSimulator : Node2D
 	{
 		EnsureEnemyPathStateSize();
 		var e = _enemies[index];
+		e.Destination = ClampToGridBounds(e.Destination);
 		var pathQueue = _enemyPathQueues[index];
 		pathQueue.Clear();
 		_enemyMoveBudget[index] = 0f;
@@ -1238,6 +1393,8 @@ public partial class GridSimulator : Node2D
 	private void StepCharactersTowardDestination()
 	{
 		EnsurePathStateSize();
+		EnsureCharacterDestinationsAreValid();
+		EnsureEnemyDestinationsAreValid();
 		for (var i = 0; i < _characters.Count; i++)
 		{
 			var character = _characters[i];
@@ -1333,7 +1490,7 @@ public partial class GridSimulator : Node2D
 				continue;
 			}
 
-			e.Destination = chase!.Cell;
+			e.Destination = ClampToGridBounds(chase!.Cell);
 			if (pathQueue.Count == 0 || _enemyPursueCells[ei] != chase.Cell)
 			{
 				_enemyPursueCells[ei] = chase.Cell;
@@ -1669,7 +1826,7 @@ public partial class GridSimulator : Node2D
 
 	private Vector2I FindNewDestinationAfterArrival(ColonyCharacter c) =>
 		c.Type == ColonyCharacterType.Civilian
-			? FindCivilianFleeDestination(c, c.Cell)
+			? FindCivilianFleeDestination(c, c.Cell, BuildReservedCivilianDestinationsExcluding(c))
 			: FindRandomValidDestinationCell(c.Cell);
 
 	private static int ManhattanDistance(Vector2I a, Vector2I b) =>
@@ -1768,12 +1925,24 @@ public partial class GridSimulator : Node2D
 		return list;
 	}
 
-	/// <summary>Valid, non-water cell that maximizes distance to the nearest current enemy (Manhattan). No enemies → random valid.</summary>
-	private Vector2I FindCivilianFleeDestination(ColonyCharacter self, Vector2I? avoidCell = null)
+	/// <summary>Valid, non-water cell that maximizes distance to the nearest current enemy (Manhattan). No enemies → random valid. <paramref name="reservedCivilianDestinations"/> excludes goals already taken by other living civilians when non-null.</summary>
+	private Vector2I FindCivilianFleeDestination(
+		ColonyCharacter self,
+		Vector2I? avoidCell = null,
+		ISet<Vector2I>? reservedCivilianDestinations = null
+	)
 	{
 		var enemies = GetEnemyCellsForCivilian(self);
 		if (enemies.Count == 0)
-			return FindRandomValidDestinationCell(avoidCell ?? self.Cell);
+		{
+			if (reservedCivilianDestinations != null && reservedCivilianDestinations.Count > 0)
+			{
+				var pick = FindFirstWalkableDestinationExcluding(reservedCivilianDestinations, avoidCell ?? self.Cell);
+				if (IsValidDestinationCell(pick) && !reservedCivilianDestinations.Contains(pick))
+					return pick;
+			}
+			return FindRandomValidDestinationCell(avoidCell ?? self.Cell, reservedCivilianDestinations);
+		}
 
 		var bestScore = -1;
 		var best = new Vector2I(
@@ -1789,6 +1958,8 @@ public partial class GridSimulator : Node2D
 				if (!IsValidDestinationCell(cell))
 					continue;
 				if (avoidCell.HasValue && cell == avoidCell.Value)
+					continue;
+				if (reservedCivilianDestinations != null && reservedCivilianDestinations.Contains(cell))
 					continue;
 				var minD = int.MaxValue;
 				for (var e = 0; e < enemies.Count; e++)
@@ -1806,25 +1977,38 @@ public partial class GridSimulator : Node2D
 		}
 
 		if (bestScore < 0)
-			return FindRandomValidDestinationCell(avoidCell);
-		return best;
+		{
+			var ex = reservedCivilianDestinations ?? new HashSet<Vector2I>();
+			return FindFirstWalkableDestinationExcluding(ex, avoidCell);
+		}
+		if (reservedCivilianDestinations != null && reservedCivilianDestinations.Contains(best))
+			return FindFirstWalkableDestinationExcluding(reservedCivilianDestinations, avoidCell);
+		return ClampToGridBounds(best);
+	}
+
+	/// <summary>Current destination goals of all other living civilians, for choosing a new goal that does not collide with peers.</summary>
+	private HashSet<Vector2I> BuildReservedCivilianDestinationsExcluding(ColonyCharacter self)
+	{
+		var set = new HashSet<Vector2I>();
+		for (var i = 0; i < _characters.Count; i++)
+		{
+			var o = _characters[i];
+			if (o.Type != ColonyCharacterType.Civilian || o.Health <= 0)
+				continue;
+			if (o.Id == self.Id)
+				continue;
+			set.Add(ClampToGridBounds(o.Destination));
+		}
+		return set;
 	}
 
 	private Vector2I GetDestinationForPathFallback(ColonyCharacter c) =>
 		c.Type == ColonyCharacterType.Civilian
-			? FindCivilianFleeDestination(c, c.Cell)
+			? FindCivilianFleeDestination(c, c.Cell, BuildReservedCivilianDestinationsExcluding(c))
 			: FindRandomValidDestinationCell(c.Cell);
 
-	private void RecalculateCivilianFleeDestinationsFromCurrentEnemies()
-	{
-		for (var i = 0; i < _characters.Count; i++)
-		{
-			var c = _characters[i];
-			if (c.Type != ColonyCharacterType.Civilian)
-				continue;
-			c.Destination = FindCivilianFleeDestination(c, c.Cell);
-		}
-	}
+	private void RecalculateCivilianFleeDestinationsFromCurrentEnemies() =>
+		AssignUniqueCivilianFleeDestinationsInOrder();
 
 	private bool IsWalkableCharacterCell(Vector2I cell)
 	{
