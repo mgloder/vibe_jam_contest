@@ -18,7 +18,7 @@ corner_radius_bottom_left = 14
 offset_left = 1028.0
 offset_top = 18.0
 offset_right = 1258.0
-offset_bottom = 380.0
+offset_bottom = 458.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
 script = ExtResource("1_panel_script")
 
@@ -97,13 +97,42 @@ text = "Remove NPC"
 [node name="TerrainTitle" type="Label" parent="ControlMargin/ControlVBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 14
-text = "Terrain"
+text = "Terrain Remove"
 
 [node name="GenerateTerrainButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1264839912]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
 text = "Generate Terrain"
+
+[node name="TerrainSmoothnessRow" type="HBoxContainer" parent="ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="TerrainSmoothnessLabel" type="Label" parent="ControlMargin/ControlVBox/TerrainSmoothnessRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 13
+text = "Smoothness"
+vertical_alignment = 1
+
+[node name="TerrainSmoothnessValueLabel" type="Label" parent="ControlMargin/ControlVBox/TerrainSmoothnessRow" unique_id=493295218]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(44, 22)
+layout_mode = 2
+theme_override_font_sizes/font_size = 13
+text = "60%"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="TerrainSmoothnessSlider" type="HSlider" parent="ControlMargin/ControlVBox" unique_id=1430878621]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+value = 0.6
 
 [node name="GrassButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=170639252]
 unique_name_in_owner = true
@@ -127,4 +156,16 @@ text = "Mountain"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 26)
 layout_mode = 2
-text = "Water"
+text = "Remove Water"
+
+[node name="RoadButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1984394602]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Remove Road"
+
+[node name="BuildingButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1233154975]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Remove Building"

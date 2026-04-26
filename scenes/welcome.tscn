@@ -1,6 +1,6 @@
-[gd_scene format=3 uid="uid://bj4qm8w3kx7np"]
+[gd_scene format=3 uid="uid://0upas2eue2fv"]
 
-[ext_resource type="Script" uid="uid://c062jdhge3dy" path="res://scripts/WelcomeScreen.cs" id="1_welcome"]
+[ext_resource type="Script" path="res://scripts/WelcomeScreen.cs" id="1_welcome"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
 bg_color = Color(0.105882, 0.129412, 0.188235, 0.941176)

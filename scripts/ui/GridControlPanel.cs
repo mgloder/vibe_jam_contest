@@ -9,7 +9,10 @@ public partial class GridControlPanel : PanelContainer
 	private Button _forestButton = null!;
 	private Button _mountainButton = null!;
 	private Button _waterButton = null!;
+	private Button _roadButton = null!;
+	private Button _buildingButton = null!;
 	private Label _expandSizeValueLabel = null!;
+	private Label _terrainSmoothnessValueLabel = null!;
 
 	public event Action? RandomizeCharacterRequested;
 	public event Action? ShowCharacterRequested;
@@ -17,7 +20,8 @@ public partial class GridControlPanel : PanelContainer
 	public event Action? BuildingSimulatorRequested;
 	public event Action? GenerateTerrainRequested;
 	public event Action<int>? BuildingExpandSizeChanged;
-	public event Action<TerrainType>? TerrainSelected;
+	public event Action<float>? TerrainSmoothnessChanged;
+	public event Action<TerrainType>? TerrainRemoveRequested;
 
 	public override void _Ready()
 	{
@@ -29,10 +33,14 @@ public partial class GridControlPanel : PanelContainer
 		var expandSizeDownButton = GetNode<Button>("%ExpandSizeDownButton");
 		var expandSizeUpButton = GetNode<Button>("%ExpandSizeUpButton");
 		_expandSizeValueLabel = GetNode<Label>("%ExpandSizeValueLabel");
+		var terrainSmoothnessSlider = GetNode<HSlider>("%TerrainSmoothnessSlider");
+		_terrainSmoothnessValueLabel = GetNode<Label>("%TerrainSmoothnessValueLabel");
 		_grassButton = GetNode<Button>("%GrassButton");
 		_forestButton = GetNode<Button>("%ForestButton");
 		_mountainButton = GetNode<Button>("%MountainButton");
 		_waterButton = GetNode<Button>("%WaterButton");
+		_roadButton = GetNode<Button>("%RoadButton");
+		_buildingButton = GetNode<Button>("%BuildingButton");
 
 		randomizeButton.Pressed += () => RandomizeCharacterRequested?.Invoke();
 		buildingButton.Pressed += () => BuildingSimulatorRequested?.Invoke();
@@ -41,10 +49,13 @@ public partial class GridControlPanel : PanelContainer
 		_removeCharacterButton.Pressed += () => RemoveCharacterRequested?.Invoke();
 		expandSizeDownButton.Pressed += () => BuildingExpandSizeChanged?.Invoke(-1);
 		expandSizeUpButton.Pressed += () => BuildingExpandSizeChanged?.Invoke(1);
-		_grassButton.Pressed += () => TerrainSelected?.Invoke(TerrainType.Grass);
-		_forestButton.Pressed += () => TerrainSelected?.Invoke(TerrainType.Forest);
-		_mountainButton.Pressed += () => TerrainSelected?.Invoke(TerrainType.Mountain);
-		_waterButton.Pressed += () => TerrainSelected?.Invoke(TerrainType.Water);
+		terrainSmoothnessSlider.ValueChanged += value => TerrainSmoothnessChanged?.Invoke((float)value);
+		_grassButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Grass);
+		_forestButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Forest);
+		_mountainButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Mountain);
+		_waterButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Water);
+		_roadButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Road);
+		_buildingButton.Pressed += () => TerrainRemoveRequested?.Invoke(TerrainType.Building);
 	}
 
 	public void SetCharacterVisibilityState(bool isVisible)
@@ -59,16 +70,16 @@ public partial class GridControlPanel : PanelContainer
 		randomizeButton.Disabled = !enabled;
 	}
 
-	public void SetSelectedTerrain(TerrainType? terrain)
-	{
-		_grassButton.Disabled = terrain == TerrainType.Grass;
-		_forestButton.Disabled = terrain == TerrainType.Forest;
-		_mountainButton.Disabled = terrain == TerrainType.Mountain;
-		_waterButton.Disabled = terrain == TerrainType.Water;
-	}
-
 	public void SetBuildingExpandSize(int value)
 	{
 		_expandSizeValueLabel.Text = value.ToString();
+	}
+
+	public void SetTerrainSmoothness(float value)
+	{
+		var clamped = Mathf.Clamp(value, 0f, 1f);
+		var slider = GetNode<HSlider>("%TerrainSmoothnessSlider");
+		slider.Value = clamped;
+		_terrainSmoothnessValueLabel.Text = $"{Mathf.RoundToInt(clamped * 100f)}%";
 	}
 }

@@ -18,6 +18,9 @@ public partial class GridSimulator : Node2D
 	[Export]
 	public float BuildingGrowthIntervalSec { get; set; } = 0.2f;
 
+	[Export(PropertyHint.Range, "0,1,0.01")]
+	public float TerrainSmoothness { get; set; } = 0.6f;
+
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
 	private Control _topPanel = null!;
@@ -25,8 +28,6 @@ public partial class GridSimulator : Node2D
 	private ColonyCharacter _firstNpc = null!;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
-	private TerrainType _selectedTerrain = TerrainType.Grass;
-	private bool _hasSelectedTerrain;
 	private TerrainType[,] _terrain = null!;
 	private readonly HashSet<Vector2I> _buildingCells = new();
 	private bool _buildingSimEnabled;
@@ -37,6 +38,7 @@ public partial class GridSimulator : Node2D
 	private Vector2I _lastCompletedBuildingOrigin;
 	private int _buildingWidthCells;
 	private int _buildingHeightCells;
+	private const int BuildingSizeMultiplier = 2;
 
 	public override void _Ready()
 	{
@@ -48,13 +50,15 @@ public partial class GridSimulator : Node2D
 		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
 		_controlPanel.BuildingSimulatorRequested += OnOpenBuildingSimulatorPressed;
 		_controlPanel.GenerateTerrainRequested += OnGenerateTerrainPressed;
+		_controlPanel.TerrainRemoveRequested += OnTerrainRemoveRequested;
 		_controlPanel.BuildingExpandSizeChanged += OnBuildingExpandSizeChanged;
+		_controlPanel.TerrainSmoothnessChanged += OnTerrainSmoothnessChanged;
 		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
 		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
-		_controlPanel.TerrainSelected += SelectTerrain;
 
 		_terrain = new TerrainType[GridWidth, GridHeight];
-		TerrainSystem.InitializeEmpty(_terrain);
+		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		RemoveAllBuildingsFromBoard();
 		_buildingGrowthTimer = new Timer();
 		_buildingGrowthTimer.WaitTime = BuildingGrowthIntervalSec;
 		_buildingGrowthTimer.OneShot = false;
@@ -63,23 +67,14 @@ public partial class GridSimulator : Node2D
 
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
-		(_buildingWidthCells, _buildingHeightCells) = GetStandardBuildingSizeCells();
+		(_buildingWidthCells, _buildingHeightCells) = GetFixedBuildingSizeCellsFromCharacter();
 		_controlPanel.SetBuildingExpandSize(BuildingGrowthPerTick);
+		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
 		UpdateHud();
 	}
 
 	public override void _UnhandledInput(InputEvent @event)
 	{
-		if (@event is InputEventMouseButton mouseButton &&
-			mouseButton.Pressed &&
-			mouseButton.ButtonIndex == MouseButton.Left)
-		{
-			if (!_buildingSimEnabled)
-				PaintTerrainAt(mouseButton.Position);
-			GetViewport().SetInputAsHandled();
-			return;
-		}
-
 		if (@event is not InputEventKey key || !key.Pressed || key.Echo)
 			return;
 
@@ -108,10 +103,7 @@ public partial class GridSimulator : Node2D
 			for (var x = 0; x < GridWidth; x++)
 			{
 				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
-				var cell = new Vector2I(x, y);
-				var color = _buildingCells.Contains(cell)
-					? BuildingCellColor(x, y)
-					: TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
+				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
 				DrawRect(new Rect2(px, cellSize), color);
 			}
 		}
@@ -217,15 +209,13 @@ public partial class GridSimulator : Node2D
 
 	private void UpdateHud()
 	{
-		var brushText = _hasSelectedTerrain ? _selectedTerrain.ToString() : "None (pick a terrain button)";
 		var projectState = _hasActiveBuildingProject ? "Building" : _buildingSimEnabled ? "Seeking Next" : "Idle";
 		var buildingState = _buildingSimEnabled ? $"ON ({_buildingCells.Count})" : "OFF";
-		_statusLabel.Text = $"Character simulator scaffold | Brush: {brushText} | Building Sim: {buildingState} | Project: {projectState}";
+		_statusLabel.Text = $"Character simulator scaffold | Terrain tools: Remove mode | Building Sim: {buildingState} | Project: {projectState}";
 		var visibility = _isCharacterVisible ? "Shown" : "Removed";
 		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} ({_firstNpc.Type}) @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  Building: {_buildingWidthCells}x{_buildingHeightCells}  |  NPC State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
-		_controlPanel.SetSelectedTerrain(_hasSelectedTerrain ? _selectedTerrain : null);
 	}
 
 	private void OnRandomizeCharacterPressed()
@@ -237,26 +227,8 @@ public partial class GridSimulator : Node2D
 
 	private void OnOpenBuildingSimulatorPressed()
 	{
-		_buildingSimEnabled = !_buildingSimEnabled;
-		if (_buildingSimEnabled)
-		{
-			if (_buildingCells.Count == 0)
-			{
-				var firstOrigin = GetInitialBuildingOrigin();
-				StartBuildingProject(firstOrigin);
-			}
-			else if (!_hasActiveBuildingProject)
-			{
-				TryStartNextBuildingProject();
-			}
-
-			_buildingGrowthTimer.Start();
-		}
-		else
-		{
-			_buildingGrowthTimer.Stop();
-		}
-
+		// Building feature disabled for now; keep board building-free.
+		RemoveAllBuildingsFromBoard();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -270,7 +242,35 @@ public partial class GridSimulator : Node2D
 
 	private void OnGenerateTerrainPressed()
 	{
-		TerrainSystem.InitializeRandom(_terrain, _rng);
+		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
+		RemoveAllBuildingsFromBoard();
+		QueueRedraw();
+	}
+
+	private void OnTerrainRemoveRequested(TerrainType terrainType)
+	{
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				if (_terrain[x, y] == terrainType)
+					_terrain[x, y] = TerrainType.None;
+			}
+		}
+
+		// Removing building should clear both terrain-building tiles and constructed building cells.
+		if (terrainType == TerrainType.Building)
+			RemoveAllBuildingsFromBoard();
+
+		QueueRedraw();
+	}
+
+	private void OnTerrainSmoothnessChanged(float value)
+	{
+		TerrainSmoothness = Mathf.Clamp(value, 0f, 1f);
+		_controlPanel.SetTerrainSmoothness(TerrainSmoothness);
+		// Apply immediately so slider feedback is obvious.
+		TerrainSystem.InitializeGaussianConstrained(_terrain, _rng, TerrainSmoothness);
 		QueueRedraw();
 	}
 
@@ -285,31 +285,6 @@ public partial class GridSimulator : Node2D
 	{
 		_isCharacterVisible = false;
 		UpdateHud();
-		QueueRedraw();
-	}
-
-	private void SelectTerrain(TerrainType terrain)
-	{
-		_selectedTerrain = terrain;
-		_hasSelectedTerrain = true;
-		UpdateHud();
-	}
-
-	private void PaintTerrainAt(Vector2 mousePosition)
-	{
-		var origin = GetGridOrigin();
-		var local = mousePosition - origin;
-		if (local.X < 0 || local.Y < 0)
-			return;
-
-		var x = (int)(local.X / CellSize);
-		var y = (int)(local.Y / CellSize);
-		if (x < 0 || y < 0 || x >= GridWidth || y >= GridHeight)
-			return;
-		if (!_hasSelectedTerrain)
-			return;
-
-		_terrain[x, y] = _selectedTerrain;
 		QueueRedraw();
 	}
 
@@ -418,14 +393,15 @@ public partial class GridSimulator : Node2D
 		return true;
 	}
 
-	private (int widthCells, int heightCells) GetStandardBuildingSizeCells()
+	private (int widthCells, int heightCells) GetFixedBuildingSizeCellsFromCharacter()
 	{
+		// Stable rule: building footprint is always 2x character footprint.
 		var spriteWidth = _firstNpc.SpriteRows.Length == 0 ? 7 : _firstNpc.SpriteRows[0].Length;
 		var spriteHeight = Mathf.Max(1, _firstNpc.SpriteRows.Length);
 		var pixelScale = Mathf.Max(2, CellSize * 2);
 		var characterWidthCells = Mathf.Max(1, Mathf.CeilToInt((spriteWidth * pixelScale) / (float)CellSize));
 		var characterHeightCells = Mathf.Max(1, Mathf.CeilToInt((spriteHeight * pixelScale) / (float)CellSize));
-		return (characterWidthCells * 2, characterHeightCells * 2);
+		return (characterWidthCells * BuildingSizeMultiplier, characterHeightCells * BuildingSizeMultiplier);
 	}
 
 	private void Shuffle(List<Vector2I> values)
@@ -441,6 +417,26 @@ public partial class GridSimulator : Node2D
 	{
 		var checker = ((x + y) & 1) == 0;
 		return checker ? new Color(0.73f, 0.55f, 0.31f) : new Color(0.65f, 0.47f, 0.24f);
+	}
+
+	private void RemoveAllBuildingsFromBoard()
+	{
+		for (var y = 0; y < GridHeight; y++)
+		{
+			for (var x = 0; x < GridWidth; x++)
+			{
+				if (_terrain[x, y] == TerrainType.Building ||
+					_terrain[x, y] == TerrainType.Road ||
+					_terrain[x, y] == TerrainType.Mountain)
+					_terrain[x, y] = TerrainType.Grass;
+			}
+		}
+
+		_buildingCells.Clear();
+		_activeBuildingQueue.Clear();
+		_hasActiveBuildingProject = false;
+		_buildingSimEnabled = false;
+		_buildingGrowthTimer?.Stop();
 	}
 
 }
