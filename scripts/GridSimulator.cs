@@ -13,6 +13,7 @@ public partial class GridSimulator : Node2D
 
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
+	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private ColonyCharacter _firstNpc = null!;
 	private readonly RandomNumberGenerator _rng = new();
@@ -26,6 +27,7 @@ public partial class GridSimulator : Node2D
 		_rng.Randomize();
 		_statusLabel = GetNode<Label>("%StatusLabel");
 		_statsLabel = GetNode<Label>("%StatsLabel");
+		_topPanel = GetNode<Control>("UI/TopPanel");
 		_controlPanel = GetNode<GridControlPanel>("%ControlPanel");
 		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
 		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
@@ -135,8 +137,24 @@ public partial class GridSimulator : Node2D
 		var viewport = GetViewportRect().Size;
 		var boardWidth = GridWidth * CellSize;
 		var boardHeight = GridHeight * CellSize;
-		var x = Mathf.Floor((viewport.X - boardWidth) * 0.5f);
-		var y = Mathf.Floor((viewport.Y - boardHeight) * 0.5f + 24f);
+
+		// Reserve space for the right-side control panel so the board never renders underneath it.
+		var panelLeftX = _controlPanel.GetGlobalRect().Position.X;
+		var leftPadding = 16f;
+		var rightPadding = 12f;
+		var availableWidth = panelLeftX - rightPadding - leftPadding;
+		var x = Mathf.Floor(leftPadding + (availableWidth - boardWidth) * 0.5f);
+		x = Mathf.Max(leftPadding, x);
+
+		// Reserve space for the top info panel.
+		var topPanelBottom = _topPanel.GetGlobalRect().End.Y;
+		var topPadding = 10f;
+		var bottomPadding = 16f;
+		var topBound = topPanelBottom + topPadding;
+		var availableHeight = viewport.Y - topBound - bottomPadding;
+		var y = Mathf.Floor(topBound + (availableHeight - boardHeight) * 0.5f);
+		y = Mathf.Max(topBound, y);
+
 		return new Vector2(x, y);
 	}
 
