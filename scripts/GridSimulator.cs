@@ -13,24 +13,28 @@ public partial class GridSimulator : Node2D
 
 	private Label _statusLabel = null!;
 	private Label _statsLabel = null!;
-	private Button _randomizeCharacterButton = null!;
-	private Button _showCharacterButton = null!;
-	private Button _removeCharacterButton = null!;
+	private GridControlPanel _controlPanel = null!;
 	private ColonyCharacter _firstNpc = null!;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
+	private TerrainType _selectedTerrain = TerrainType.Grass;
+	private bool _hasSelectedTerrain;
+	private TerrainType[,] _terrain = null!;
 
 	public override void _Ready()
 	{
 		_rng.Randomize();
 		_statusLabel = GetNode<Label>("%StatusLabel");
 		_statsLabel = GetNode<Label>("%StatsLabel");
-		_randomizeCharacterButton = GetNode<Button>("%RandomizeCharacterButton");
-		_showCharacterButton = GetNode<Button>("%ShowCharacterButton");
-		_removeCharacterButton = GetNode<Button>("%RemoveCharacterButton");
-		_randomizeCharacterButton.Pressed += OnRandomizeCharacterPressed;
-		_showCharacterButton.Pressed += OnShowCharacterPressed;
-		_removeCharacterButton.Pressed += OnRemoveCharacterPressed;
+		_controlPanel = GetNode<GridControlPanel>("%ControlPanel");
+		_controlPanel.RandomizeCharacterRequested += OnRandomizeCharacterPressed;
+		_controlPanel.ShowCharacterRequested += OnShowCharacterPressed;
+		_controlPanel.RemoveCharacterRequested += OnRemoveCharacterPressed;
+		_controlPanel.TerrainSelected += SelectTerrain;
+
+		_terrain = new TerrainType[GridWidth, GridHeight];
+		TerrainSystem.InitializeEmpty(_terrain);
+
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
 		UpdateHud();
@@ -38,6 +42,15 @@ public partial class GridSimulator : Node2D
 
 	public override void _UnhandledInput(InputEvent @event)
 	{
+		if (@event is InputEventMouseButton mouseButton &&
+			mouseButton.Pressed &&
+			mouseButton.ButtonIndex == MouseButton.Left)
+		{
+			PaintTerrainAt(mouseButton.Position);
+			GetViewport().SetInputAsHandled();
+			return;
+		}
+
 		if (@event is not InputEventKey key || !key.Pressed || key.Echo)
 			return;
 
@@ -66,8 +79,7 @@ public partial class GridSimulator : Node2D
 			for (var x = 0; x < GridWidth; x++)
 			{
 				var px = origin + new Vector2(x * CellSize + cellPad, y * CellSize + cellPad);
-				var checker = ((x + y) & 1) == 0;
-				var color = checker ? new Color(0.13f, 0.15f, 0.21f) : new Color(0.11f, 0.13f, 0.18f);
+				var color = TerrainSystem.TerrainToColor(_terrain[x, y], x, y);
 				DrawRect(new Rect2(px, cellSize), color);
 			}
 		}
@@ -130,12 +142,13 @@ public partial class GridSimulator : Node2D
 
 	private void UpdateHud()
 	{
-		_statusLabel.Text = "Character simulator scaffold";
+		var brushText = _hasSelectedTerrain ? _selectedTerrain.ToString() : "None (pick a terrain button)";
+		_statusLabel.Text = $"Character simulator scaffold | Brush: {brushText}";
 		var visibility = _isCharacterVisible ? "Shown" : "Removed";
 		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  State: {visibility}";
-		_showCharacterButton.Disabled = _isCharacterVisible;
-		_removeCharacterButton.Disabled = !_isCharacterVisible;
-		_randomizeCharacterButton.Disabled = !_isCharacterVisible;
+		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
+		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
+		_controlPanel.SetSelectedTerrain(_hasSelectedTerrain ? _selectedTerrain : null);
 	}
 
 	private void OnRandomizeCharacterPressed()
@@ -158,4 +171,30 @@ public partial class GridSimulator : Node2D
 		UpdateHud();
 		QueueRedraw();
 	}
+
+	private void SelectTerrain(TerrainType terrain)
+	{
+		_selectedTerrain = terrain;
+		_hasSelectedTerrain = true;
+		UpdateHud();
+	}
+
+	private void PaintTerrainAt(Vector2 mousePosition)
+	{
+		var origin = GetGridOrigin();
+		var local = mousePosition - origin;
+		if (local.X < 0 || local.Y < 0)
+			return;
+
+		var x = (int)(local.X / CellSize);
+		var y = (int)(local.Y / CellSize);
+		if (x < 0 || y < 0 || x >= GridWidth || y >= GridHeight)
+			return;
+		if (!_hasSelectedTerrain)
+			return;
+
+		_terrain[x, y] = _selectedTerrain;
+		QueueRedraw();
+	}
+
 }
