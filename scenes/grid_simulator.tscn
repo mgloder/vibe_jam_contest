@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://scripts/GridSimulator.cs" id="1_grid_sim"]
 [ext_resource type="Script" path="res://scripts/ui/AbilityCardHolder.cs" id="2_ability_card_holder"]
+[ext_resource type="AudioStream" uid="uid://ckudmwii1j5y0" path="res://scenes/music/bgm.mp3" id="3_bgm"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_topbar"]
 bg_color = Color(0.07, 0.09, 0.14, 0.95)
@@ -31,6 +32,12 @@ content_margin_bottom = 3
 
 [node name="Game" type="Node2D"]
 script = ExtResource("1_grid_sim")
+
+[node name="BgmPlayer" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("3_bgm")
+volume_db = 0.0
+autoplay = true
+bus = &"Master"
 
 [node name="BackgroundLayer" type="CanvasLayer" parent="."]
 layer = -1

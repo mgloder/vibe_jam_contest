@@ -4,8 +4,8 @@ using System.Collections.Generic;
 /// <summary>
 /// Monster: Servant, drawn as a Cthulhu-style silhouette.
 /// Renders at <see cref="PixelScaleMultiplierVsCharacter"/> times the same base pixel size used for <see cref="ColonyCharacter"/> art.
-/// Pathfinding in <see cref="GridSimulator"/> uses the same 4-way <c>GridAStar</c> as other units, with
-/// a walkable test so the full token board never covers water (or buildings). Melee: Chebyshev ≤1
+/// Pathfinding in <see cref="GridSimulator"/> uses the same 4-way <c>GridAStar</c> as other units (single-cell
+/// walkable anchor; the large drawn sprite is visual-only on the grid). Melee: Chebyshev ≤1
 /// (3×3) from <see cref="Cell"/>; takes damage from <see cref="ColonyCharacter"/> ranged/melee in range.
 /// </summary>
 public sealed class Servant

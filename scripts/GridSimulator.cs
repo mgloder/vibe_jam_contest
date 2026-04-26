@@ -1068,7 +1068,7 @@ public partial class GridSimulator : Node2D
 		}
 	}
 
-	/// <summary>Spawn/refresh the Cthulhu token at a random valid anchor; BFS nudges the anchor so the full token avoids water and buildings (see <see cref="IsWalkableForServantAnchorCell(Servant, Vector2I)"/>).</summary>
+	/// <summary>Spawn/refresh the Cthulhu token at a random valid anchor; BFS finds a walkable anchor cell (same single-cell rules as other units).</summary>
 	private void PlaceServant()
 	{
 		var start = FindRandomValidDestinationCell();
@@ -1895,61 +1895,23 @@ public partial class GridSimulator : Node2D
 		return attackRangeStat * MinGridLineStepCells;
 	}
 
-	/// <summary>Token board AABB for the Servant (includes <see cref="Servant.PixelScaleMultiplierVsCharacter"/>).</summary>
-	/// <param name="anchorCell">Cell grid position for the Servant (same as <see cref="Servant.Cell"/> for current pose).</param>
-	private Rect2 GetServantBoardRectForAnchor(Servant s, Vector2I anchorCell)
+	/// <summary>
+	/// Whether the Servant can stand on <paramref name="anchorCell"/> for pathfinding and sim steps. Uses the same
+	/// O(1) test as other units. (A previous version iterated the full pixel-scaled token AABB in grid cells, which
+	/// is hundreds to thousands of cells per check when the board is zoomed out — and A* calls that per open-set
+	/// neighbor, which froze the game.) The Cthulhu sprite may extend visually over adjacent cells; collision is
+	/// logical single-cell, like other tokens.
+	/// </summary>
+	private bool IsWalkableForServantAnchorCell(Servant _, Vector2I anchorCell)
 	{
-		var w = s.SpriteRows.Length == 0 ? 1 : s.SpriteRows[0].Length;
-		var h = Mathf.Max(1, s.SpriteRows.Length);
-		var px = _boardPixelsPerCell;
-		var basePixel = Mathf.Max(2, px * 2);
-		var pixelScale = basePixel * Servant.PixelScaleMultiplierVsCharacter;
-		return GetTokenBoardRectInGridCells(anchorCell, w, h, s.SpritePivot, pixelScale, px);
+		if (anchorCell.X < 0 || anchorCell.Y < 0 || anchorCell.X >= GridWidth || anchorCell.Y >= GridHeight)
+			return false;
+		return IsWalkableCharacterCell(anchorCell);
 	}
 
-	private Rect2 GetServantBoardRect(Servant s) => GetServantBoardRectForAnchor(s, s.Cell);
-
-	/// <summary>True if the Servant token AABB in grid space only covers walkable (non-water, non-building) cells — used by the same 4-way A* as other units.</summary>
-	private bool IsWalkableForServantAnchorCell(Servant s, Vector2I anchorCell)
-	{
-		var r = GetServantBoardRectForAnchor(s, anchorCell);
-		var ex = r.Position.X + r.Size.X;
-		var ey = r.Position.Y + r.Size.Y;
-		var y0 = (int)System.Math.Floor(r.Position.Y);
-		var y1 = (int)System.Math.Ceiling(ey);
-		var x0 = (int)System.Math.Floor(r.Position.X);
-		var x1 = (int)System.Math.Ceiling(ex);
-		for (var y = y0; y < y1; y++)
-		{
-			for (var x = x0; x < x1; x++)
-			{
-				if (x < 0 || y < 0 || x >= GridWidth || y >= GridHeight)
-					return false;
-				if (!IsWalkableCharacterCell(new Vector2I(x, y)))
-					return false;
-			}
-		}
-		return true;
-	}
-
-	/// <summary>Current Servant; same rules as A* and step (no water under any part of the board).</summary>
+	/// <summary>Current Servant; same single-cell walkable rules as <see cref="IsWalkableForServantAnchorCell(Servant,Vector2I)"/>.</summary>
 	private bool IsWalkableForServantAnchorCell(Vector2I anchorCell) =>
 		_servant != null && IsWalkableForServantAnchorCell(_servant, anchorCell);
-
-	private static Rect2 GetTokenBoardRectInGridCells(
-		Vector2I cell, int spriteW, int spriteH, Vector2I pivot, float pixelScale, float cellPixelSize)
-	{
-		var cs = Mathf.Max(1f, cellPixelSize);
-		var leftX = (0f - pivot.X) * pixelScale;
-		var rightX = (spriteW - pivot.X) * pixelScale;
-		var topY = (0f - pivot.Y) * pixelScale;
-		var bottomY = (spriteH - pivot.Y) * pixelScale;
-		var xMin = (cell.X * cs + leftX) / cs;
-		var yMin = (cell.Y * cs + topY) / cs;
-		var xMax = (cell.X * cs + rightX) / cs;
-		var yMax = (cell.Y * cs + bottomY) / cs;
-		return new Rect2(xMin, yMin, xMax - xMin, yMax - yMin);
-	}
 
 	/// <summary>Attack-capable units (and the Servant while alive) are treated as threats for flee targeting.</summary>
 	private List<Vector2I> GetEnemyCellsForCivilian(ColonyCharacter self)
