@@ -16,7 +16,6 @@ public partial class GridSimulator : Node2D
 	private Control _topPanel = null!;
 	private GridControlPanel _controlPanel = null!;
 	private ColonyCharacter _firstNpc = null!;
-	private Texture2D? _firstNpcTexture;
 	private readonly RandomNumberGenerator _rng = new();
 	private bool _isCharacterVisible = true;
 	private TerrainType _selectedTerrain = TerrainType.Grass;
@@ -40,7 +39,6 @@ public partial class GridSimulator : Node2D
 
 		var centerCell = new Vector2I(GridWidth / 2, GridHeight / 2);
 		_firstNpc = ColonyCharacter.CreateStarter(centerCell);
-		RefreshCharacterVisualCache();
 		UpdateHud();
 	}
 
@@ -112,12 +110,6 @@ public partial class GridSimulator : Node2D
 	private void DrawFirstNpc(Vector2 gridOrigin)
 	{
 		var cellTopLeft = gridOrigin + new Vector2(_firstNpc.Cell.X * CellSize, _firstNpc.Cell.Y * CellSize);
-		if (_firstNpc.VisualType == ColonyCharacterVisualType.TextureSprite && _firstNpcTexture is not null)
-		{
-			DrawCharacterTexture(cellTopLeft, _firstNpcTexture);
-			return;
-		}
-
 		var pixelScale = Mathf.Max(2, CellSize * 2);
 
 		for (var y = 0; y < _firstNpc.SpriteRows.Length; y++)
@@ -138,22 +130,33 @@ public partial class GridSimulator : Node2D
 				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
 			}
 		}
+
+		DrawNpcTool(cellTopLeft, pixelScale);
 	}
 
-	private void DrawCharacterTexture(Vector2 cellTopLeft, Texture2D texture)
+	private void DrawNpcTool(Vector2 cellTopLeft, float pixelScale)
 	{
-		var textureSize = texture.GetSize();
-		if (textureSize.X <= 0f || textureSize.Y <= 0f)
+		if (_firstNpc.Tool == CharacterToolType.None || _firstNpc.ToolRows.Length == 0)
 			return;
 
-		// Keep character readable at tiny grid cells while preserving sprite proportions.
-		var targetHeight = Mathf.Max(CellSize * 64f, _firstNpc.TextureTargetHeightPx);
-		var scale = targetHeight / textureSize.Y;
-		var drawSize = textureSize * scale;
+		for (var y = 0; y < _firstNpc.ToolRows.Length; y++)
+		{
+			var row = _firstNpc.ToolRows[y];
+			for (var x = 0; x < row.Length; x++)
+			{
+				var token = row[x];
+				if (token == '.')
+					continue;
+				if (!_firstNpc.ToolPalette.TryGetValue(token, out var color))
+					continue;
 
-		// Anchor texture around the actor's tile center.
-		var drawPos = cellTopLeft - new Vector2(drawSize.X * _firstNpc.TextureAnchor.X, drawSize.Y * _firstNpc.TextureAnchor.Y);
-		DrawTextureRect(texture, new Rect2(drawPos, drawSize), false);
+				var px = cellTopLeft + new Vector2(
+					(x - _firstNpc.ToolPivot.X) * pixelScale,
+					(y - _firstNpc.ToolPivot.Y) * pixelScale
+				);
+				DrawRect(new Rect2(px, new Vector2(pixelScale, pixelScale)), color);
+			}
+		}
 	}
 
 	private Vector2 GetGridOrigin()
@@ -187,7 +190,7 @@ public partial class GridSimulator : Node2D
 		var brushText = _hasSelectedTerrain ? _selectedTerrain.ToString() : "None (pick a terrain button)";
 		_statusLabel.Text = $"Character simulator scaffold | Brush: {brushText}";
 		var visibility = _isCharacterVisible ? "Shown" : "Removed";
-		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  State: {visibility}";
+		_statsLabel.Text = $"Grid: {GridWidth}x{GridHeight}  |  NPC: {_firstNpc.DisplayName} ({_firstNpc.Type}) @ ({_firstNpc.Cell.X}, {_firstNpc.Cell.Y})  |  State: {visibility}";
 		_controlPanel.SetCharacterVisibilityState(_isCharacterVisible);
 		_controlPanel.SetCharacterRandomizeEnabled(_isCharacterVisible);
 		_controlPanel.SetSelectedTerrain(_hasSelectedTerrain ? _selectedTerrain : null);
@@ -196,7 +199,6 @@ public partial class GridSimulator : Node2D
 	private void OnRandomizeCharacterPressed()
 	{
 		_firstNpc = ColonyCharacter.CreateRandomized(_firstNpc.Cell, _rng);
-		RefreshCharacterVisualCache();
 		UpdateHud();
 		QueueRedraw();
 	}
@@ -238,16 +240,6 @@ public partial class GridSimulator : Node2D
 
 		_terrain[x, y] = _selectedTerrain;
 		QueueRedraw();
-	}
-
-	private void RefreshCharacterVisualCache()
-	{
-		_firstNpcTexture = null;
-		if (_firstNpc.VisualType != ColonyCharacterVisualType.TextureSprite)
-			return;
-		if (string.IsNullOrWhiteSpace(_firstNpc.TexturePath))
-			return;
-		_firstNpcTexture = GD.Load<Texture2D>(_firstNpc.TexturePath);
 	}
 
 }
