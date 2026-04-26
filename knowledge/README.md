@@ -1,6 +1,6 @@
 # Project knowledge
 
-This folder holds **living notes** about the game: design intent, architecture, conventions, and what changed recently. Update these files as the project grows so context stays easy to hand off (to collaborators or to future you).
+This folder holds **living notes** for the project starter and whatever game comes next: design intent, architecture, conventions, and what changed recently. Update these files as the project grows so context stays easy to hand off (to collaborators or to future you).
 
 ## How to use
 

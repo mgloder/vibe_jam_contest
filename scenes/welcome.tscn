@@ -88,20 +88,20 @@ alignment = 1
 layout_mode = 2
 theme_override_colors/font_color = Color(0.584314, 0.705882, 0.960784, 0.901961)
 theme_override_font_sizes/font_size = 15
-text = "GODOT 4 C# PROTOTYPE"
+text = "GODOT 4 C# STARTER"
 horizontal_alignment = 1
 
 [node name="Title" type="Label" parent="Center/Card/Margin/VBox" unique_id=49734381]
 layout_mode = 2
 theme_override_font_sizes/font_size = 64
-text = "Snake Garden"
+text = "New Game Project"
 horizontal_alignment = 1
 
 [node name="Subtitle" type="Label" parent="Center/Card/Margin/VBox" unique_id=872162110]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.784314, 0.815686, 0.886275, 1)
 theme_override_font_sizes/font_size = 20
-text = "Guide the snake across a clean arcade board, eat apples to grow, and stay away from your own tail."
+text = "Use this polished shell to kick off your next prototype."
 horizontal_alignment = 1
 autowrap_mode = 3
 
@@ -118,7 +118,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 layout_mode = 2
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
 theme_override_font_sizes/font_size = 15
-text = "Arrow keys"
+text = "Custom scene flow"
 
 [node name="GrowthCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=1805131311]
 layout_mode = 2
@@ -128,7 +128,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 layout_mode = 2
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
 theme_override_font_sizes/font_size = 15
-text = "Grow every apple"
+text = "Reusable UI card"
 
 [node name="RulesCard" type="PanelContainer" parent="Center/Card/Margin/VBox/FeatureRow" unique_id=17270122]
 layout_mode = 2
@@ -138,7 +138,7 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_pill")
 layout_mode = 2
 theme_override_colors/font_color = Color(0.870588, 0.905882, 0.968627, 1)
 theme_override_font_sizes/font_size = 15
-text = "No instant reverse"
+text = "C# ready"
 
 [node name="InfoPanel" type="PanelContainer" parent="Center/Card/Margin/VBox" unique_id=549085134]
 layout_mode = 2
@@ -155,7 +155,7 @@ theme_override_constants/margin_bottom = 18
 layout_mode = 2
 theme_override_colors/font_color = Color(0.815686, 0.847059, 0.905882, 1)
 theme_override_font_sizes/font_size = 17
-text = "Click Start to jump into the game scene. Each apple increases your length by one. Hitting the wall or your own body ends the run."
+text = "Click Start to open the gameplay placeholder. Replace it with your real first level when you are ready."
 horizontal_alignment = 1
 autowrap_mode = 3
 
@@ -167,11 +167,11 @@ theme_override_font_sizes/font_size = 26
 theme_override_styles/normal = SubResource("StyleBoxFlat_button")
 theme_override_styles/pressed = SubResource("StyleBoxFlat_button")
 theme_override_styles/hover = SubResource("StyleBoxFlat_button")
-text = "Start Game"
+text = "Open Placeholder"
 
 [node name="Footer" type="Label" parent="Center/Card/Margin/VBox" unique_id=828590968]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.588235, 0.635294, 0.713726, 1)
 theme_override_font_sizes/font_size = 15
-text = "Built as a polished 2D prototype in Godot with C#."
+text = "Clean starter structure for your next Godot C# game."
 horizontal_alignment = 1
