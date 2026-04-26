@@ -598,6 +598,9 @@ public partial class GridSimulator : Node2D
 				continue;
 			var cell = ch.Cell;
 			var label = ch.DisplayName;
+			var vfx = new CrazySpawnVfx();
+			AddChild(vfx);
+			vfx.Begin(this, cell);
 			_characters.RemoveAt(i);
 			_characterPathQueues.RemoveAt(i);
 			_characterMoveBudget.RemoveAt(i);
