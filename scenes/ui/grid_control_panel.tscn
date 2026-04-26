@@ -1,0 +1,86 @@
+[gd_scene format=3 uid="uid://r4w6h3j7m2pa"]
+
+[ext_resource type="Script" path="res://scripts/ui/GridControlPanel.cs" id="1_panel_script"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_hud"]
+bg_color = Color(0.0862745, 0.109804, 0.152941, 0.921569)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.282353, 0.392157, 0.556863, 0.901961)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+
+[node name="ControlPanel" type="PanelContainer"]
+offset_left = 1028.0
+offset_top = 18.0
+offset_right = 1258.0
+offset_bottom = 294.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_hud")
+script = ExtResource("1_panel_script")
+
+[node name="ControlMargin" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="ControlVBox" type="VBoxContainer" parent="ControlMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ControlTitle" type="Label" parent="ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Control"
+
+[node name="RandomizeCharacterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=204267713]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 30)
+layout_mode = 2
+text = "Randomize NPC"
+
+[node name="ShowCharacterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=614502299]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "Show NPC"
+
+[node name="RemoveCharacterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1468763327]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 2
+text = "Remove NPC"
+
+[node name="TerrainTitle" type="Label" parent="ControlMargin/ControlVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "Terrain"
+
+[node name="GrassButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=170639252]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Grass"
+
+[node name="ForestButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=1310200672]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Forest"
+
+[node name="MountainButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=665952575]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Mountain"
+
+[node name="WaterButton" type="Button" parent="ControlMargin/ControlVBox" unique_id=68489190]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+text = "Water"
